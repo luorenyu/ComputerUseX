@@ -244,17 +244,36 @@ public final class UnixSocketIPC: @unchecked Sendable {
         return try JSONDecoder().decode(IPCResponse.self, from: responseData)
     }
 
-    /// Executes request via OpenComputerUse.app daemon if running (so HUD animations display),
-    /// otherwise seamlessly falls back to in-process execution.
+    /// Executes request via OpenComputerUse.app daemon if available and permitted,
+    /// or executes in-process (inheriting host Terminal/IDE TCC permissions) while
+    /// streaming all visual HUD events live to OpenComputerUse.app!
     public static func executeRoutingThroughDaemonIfAvailable(
         _ request: IPCRequest,
         preferDaemon: Bool = true
     ) -> IPCResponse {
-        if preferDaemon && isDaemonReachable() {
-            if let resp = try? sendRequest(request) {
-                return resp
+        let daemonOnline = isDaemonReachable()
+
+        if preferDaemon && daemonOnline {
+            // Check daemon permission status
+            if let daemonStatusResp = try? sendRequest(IPCRequest(command: "status")),
+               let daemonStatus = daemonStatusResp.status {
+                let localAX = PermissionManager.shared.isAccessibilityGranted(prompt: false)
+                // If daemon has AX permission (or command is hud_event/hud_demo), run inside daemon directly
+                if daemonStatus.accessibilityGranted || !localAX || request.command == "hud_event" {
+                    if let resp = try? sendRequest(request) {
+                        return resp
+                    }
+                }
+            }
+
+            // Daemon is online for HUD, and local CLI process has inherited TCC permissions from host IDE/Terminal!
+            // Bridge all HUD events from local process -> OpenComputerUse.app HUD overlay in real time.
+            KillSwitchMonitor.shared.setHUDHandler { event in
+                let hudReq = IPCRequest(command: "hud_event", hudEvent: event)
+                _ = try? sendRequest(hudReq)
             }
         }
-        return OCUCommandExecutor.shared.execute(request, isDaemonContext: false)
+
+        return OCUCommandExecutor.shared.execute(request, isDaemonContext: daemonOnline)
     }
 }
