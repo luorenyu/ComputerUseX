@@ -1,0 +1,329 @@
+import Foundation
+import AppKit
+import SwiftUI
+import OCUCore
+
+public struct RippleItem: Identifiable {
+    public let id = UUID()
+    public let point: ScreenPoint
+    public let button: MouseButton
+    public let clickCount: Int
+    public let createdAt = Date()
+}
+
+public final class HUDViewModel: ObservableObject, @unchecked Sendable {
+    @Published public var isHUDEnabled: Bool = true
+    @Published public var showBorderGlow: Bool = false
+    @Published public var pillTitle: String? = nil
+    @Published public var pillSubtitle: String? = nil
+    @Published public var trailPoints: [ScreenPoint] = []
+    @Published public var highlightRect: ScreenRect? = nil
+    @Published public var highlightLabel: String? = nil
+    @Published public var ripples: [RippleItem] = []
+    @Published public var recentLogs: [String] = []
+
+    private var fadeWorkItem: DispatchWorkItem?
+    private var trailClearItem: DispatchWorkItem?
+    private var highlightClearItem: DispatchWorkItem?
+
+    public init() {}
+
+    public func handle(_ event: HUDAnimationEvent) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.isHUDEnabled else { return }
+
+            switch event {
+            case .setActiveGlow(let active):
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    self.showBorderGlow = active
+                }
+                if active {
+                    self.scheduleAutoFade()
+                }
+
+            case .statusPill(let title, let subtitle):
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
+                    self.pillTitle = title
+                    self.pillSubtitle = subtitle
+                    self.showBorderGlow = true
+                }
+                self.scheduleAutoFade()
+
+            case .pointerTrail(let points):
+                self.trailPoints = points
+                self.trailClearItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self?.trailPoints = []
+                    }
+                }
+                self.trailClearItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
+
+            case .highlightElement(let rect, let label):
+                withAnimation(.easeOut(duration: 0.15)) {
+                    self.highlightRect = rect
+                    self.highlightLabel = label
+                }
+                self.highlightClearItem?.cancel()
+                let item = DispatchWorkItem { [weak self] in
+                    withAnimation(.easeOut(duration: 0.25)) {
+                        self?.highlightRect = nil
+                        self?.highlightLabel = nil
+                    }
+                }
+                self.highlightClearItem = item
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: item)
+
+            case .clickRipple(let point, let button, let clickCount):
+                let ripple = RippleItem(point: point, button: button, clickCount: clickCount)
+                self.ripples.append(ripple)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+                    self?.ripples.removeAll { $0.id == ripple.id }
+                }
+                self.scheduleAutoFade()
+
+            case .clear:
+                withAnimation(.easeOut(duration: 0.2)) {
+                    self.showBorderGlow = false
+                    self.pillTitle = nil
+                    self.pillSubtitle = nil
+                    self.trailPoints = []
+                    self.highlightRect = nil
+                    self.ripples = []
+                }
+            }
+        }
+    }
+
+    public func appendLog(_ entry: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm:ss"
+            let stamped = "[\(formatter.string(from: Date()))] \(entry)"
+            self.recentLogs.insert(stamped, at: 0)
+            if self.recentLogs.count > 25 {
+                self.recentLogs.removeLast()
+            }
+        }
+    }
+
+    private func scheduleAutoFade() {
+        fadeWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            withAnimation(.easeInOut(duration: 0.45)) {
+                self?.showBorderGlow = false
+                self?.pillTitle = nil
+                self?.pillSubtitle = nil
+            }
+        }
+        fadeWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8, execute: item)
+    }
+}
+
+public final class OverlayHUDWindowController: @unchecked Sendable {
+    public static let shared = OverlayHUDWindowController()
+    public let viewModel = HUDViewModel()
+    private var panel: NSPanel?
+
+    private init() {}
+
+    public func setupOverlayWindow() {
+        DispatchQueue.main.async {
+            guard self.panel == nil else { return }
+            let screenFrame = NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+
+            let overlayPanel = NSPanel(
+                contentRect: screenFrame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            overlayPanel.isOpaque = false
+            overlayPanel.backgroundColor = .clear
+            overlayPanel.hasShadow = false
+            overlayPanel.ignoresMouseEvents = true
+            overlayPanel.level = .screenSaver
+            overlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            overlayPanel.contentView = NSHostingView(rootView: OverlayHUDRootView(viewModel: self.viewModel))
+            overlayPanel.orderFrontRegardless()
+            self.panel = overlayPanel
+        }
+    }
+}
+
+struct OverlayHUDRootView: View {
+    @ObservedObject var viewModel: HUDViewModel
+
+    var body: some View {
+        GeometryReader { geo in
+            ZStack(alignment: .topLeading) {
+                // 1. Screen Edge Active Glow Border
+                if viewModel.showBorderGlow {
+                    RoundedRectangle(cornerRadius: 14)
+                        .strokeBorder(
+                            LinearGradient(
+                                colors: [
+                                    Color.cyan.opacity(0.85),
+                                    Color.blue.opacity(0.75),
+                                    Color.indigo.opacity(0.85),
+                                    Color.cyan.opacity(0.85)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 4.5
+                        )
+                        .shadow(color: Color.cyan.opacity(0.65), radius: 12)
+                        .ignoresSafeArea()
+                        .transition(.opacity)
+                }
+
+                // 2. Smooth Bézier Pointer Trail Canvas
+                if viewModel.trailPoints.count >= 2 {
+                    Canvas { context, _ in
+                        var path = Path()
+                        for (idx, pt) in viewModel.trailPoints.enumerated() {
+                            let cgPt = CGPoint(x: pt.x, y: pt.y)
+                            if idx == 0 {
+                                path.move(to: cgPt)
+                            } else {
+                                path.addLine(to: cgPt)
+                            }
+                        }
+                        context.stroke(
+                            path,
+                            with: .linearGradient(
+                                Gradient(colors: [Color.cyan.opacity(0.15), Color.cyan.opacity(0.9)]),
+                                startPoint: viewModel.trailPoints.first?.cgPoint ?? .zero,
+                                endPoint: viewModel.trailPoints.last?.cgPoint ?? .zero
+                            ),
+                            style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round)
+                        )
+
+                        if let head = viewModel.trailPoints.last {
+                            let haloRect = CGRect(x: head.x - 12, y: head.y - 12, width: 24, height: 24)
+                            context.fill(Path(ellipseIn: haloRect), with: .color(Color.cyan.opacity(0.28)))
+                            context.stroke(Path(ellipseIn: haloRect), with: .color(Color.cyan), lineWidth: 2)
+                        }
+                    }
+                    .ignoresSafeArea()
+                }
+
+                // 3. Target Element Highlight Frame
+                if let rect = viewModel.highlightRect {
+                    ZStack(alignment: .topLeading) {
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.cyan, lineWidth: 2.5)
+                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.cyan.opacity(0.10)))
+                            .frame(width: max(12, rect.width), height: max(12, rect.height))
+
+                        if let label = viewModel.highlightLabel, !label.isEmpty {
+                            Text(label)
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.blue.opacity(0.92)))
+                                .offset(y: -22)
+                        }
+                    }
+                    .position(x: rect.x + rect.width / 2.0, y: rect.y + rect.height / 2.0)
+                }
+
+                // 4. Click Ripples
+                ForEach(viewModel.ripples) { ripple in
+                    ClickRippleView(ripple: ripple)
+                        .position(x: ripple.point.x, y: ripple.point.y)
+                }
+
+                // 5. Floating Bottom Status Pill
+                if let title = viewModel.pillTitle {
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 12) {
+                            Circle()
+                                .fill(Color.cyan)
+                                .frame(width: 9, height: 9)
+                                .shadow(color: .cyan, radius: 4)
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(title)
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundColor(.white)
+                                if let sub = viewModel.pillSubtitle, !sub.isEmpty {
+                                    Text(sub)
+                                        .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                        .foregroundColor(Color.white.opacity(0.78))
+                                }
+                            }
+
+                            Text("Opt+Esc 急停")
+                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .foregroundColor(.white.opacity(0.9))
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3)
+                                .background(Capsule().fill(Color.white.opacity(0.16)))
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(
+                            Capsule()
+                                .fill(Color.black.opacity(0.78))
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.cyan.opacity(0.55), lineWidth: 1.2)
+                                )
+                                .shadow(color: Color.black.opacity(0.35), radius: 10, y: 4)
+                        )
+                        .padding(.bottom, 54)
+                    }
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+        .ignoresSafeArea()
+    }
+}
+
+struct ClickRippleView: View {
+    let ripple: RippleItem
+    @State private var animate = false
+
+    private var color: Color {
+        switch ripple.button {
+        case .left: return .cyan
+        case .right: return .orange
+        case .center: return .purple
+        }
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(color, lineWidth: 3)
+                .frame(width: animate ? 58 : 10, height: animate ? 58 : 10)
+                .opacity(animate ? 0.0 : 0.95)
+
+            if ripple.clickCount >= 2 {
+                Circle()
+                    .stroke(color.opacity(0.85), lineWidth: 2)
+                    .frame(width: animate ? 82 : 16, height: animate ? 82 : 16)
+                    .opacity(animate ? 0.0 : 0.85)
+            }
+
+            Circle()
+                .fill(color)
+                .frame(width: 8, height: 8)
+                .opacity(animate ? 0.0 : 0.9)
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.55)) {
+                animate = true
+            }
+        }
+    }
+}
