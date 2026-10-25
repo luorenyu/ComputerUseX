@@ -11,10 +11,13 @@ public final class SoMAnnotator: @unchecked Sendable {
     public func annotateImage(
         _ baseImage: CGImage,
         elements: [UIElementRef],
-        scaleFactor: Double
+        scaleFactor: Double,
+        displayBounds: ScreenRect? = nil
     ) -> CGImage? {
         let width = baseImage.width
         let height = baseImage.height
+        let originX = displayBounds?.x ?? 0.0
+        let originY = displayBounds?.y ?? 0.0
         let colorSpace = CGColorSpaceCreateDeviceRGB()
 
         guard let ctx = CGContext(
@@ -29,28 +32,37 @@ public final class SoMAnnotator: @unchecked Sendable {
             return nil
         }
 
-        // Draw original screenshot at full resolution
         ctx.draw(baseImage, in: CGRect(x: 0, y: 0, width: width, height: height))
 
         NSGraphicsContext.saveGraphicsState()
         let nsCtx = NSGraphicsContext(cgContext: ctx, flipped: false)
         NSGraphicsContext.current = nsCtx
 
-        // 1. Draw subtle coordinate ruler ticks along top and left edges (every 200 logical pts)
-        drawCoordinateRuler(in: ctx, pixelWidth: width, pixelHeight: height, scaleFactor: scaleFactor)
+        drawCoordinateRuler(
+            in: ctx,
+            pixelWidth: width,
+            pixelHeight: height,
+            scaleFactor: scaleFactor,
+            originX: Int(originX),
+            originY: Int(originY)
+        )
 
-        // 2. Draw bounding boxes and @eX badges for elements
         let fontSize = CGFloat(max(11.0, 11.0 * scaleFactor))
         let font = NSFont.monospacedSystemFont(ofSize: fontSize, weight: .bold)
 
-        for element in elements.prefix(160) {
-            let px = CGFloat(element.frame.x * scaleFactor)
-            let py = CGFloat(Double(height) - (element.frame.y + element.frame.height) * scaleFactor)
+        for element in elements.prefix(180) {
+            let localX = element.frame.x - originX
+            let localY = element.frame.y - originY
+            let px = CGFloat(localX * scaleFactor)
+            let py = CGFloat(Double(height) - (localY + element.frame.height) * scaleFactor)
             let pw = CGFloat(element.frame.width * scaleFactor)
             let ph = CGFloat(element.frame.height * scaleFactor)
             let boxRect = CGRect(x: px, y: py, width: pw, height: ph)
 
-            // Color coding: Cyan/Blue for AX native elements, Emerald/Green for Vision OCR elements
+            guard boxRect.intersects(CGRect(x: 0, y: 0, width: width, height: height)) else {
+                continue
+            }
+
             let strokeColor: NSColor = (element.source == .ax)
                 ? NSColor(calibratedRed: 0.05, green: 0.58, blue: 0.98, alpha: 0.92)
                 : NSColor(calibratedRed: 0.08, green: 0.78, blue: 0.45, alpha: 0.90)
@@ -64,7 +76,6 @@ public final class SoMAnnotator: @unchecked Sendable {
             ctx.setLineWidth(CGFloat(max(1.5, 1.5 * scaleFactor)))
             ctx.stroke(boxRect)
 
-            // Draw @eX tag badge at top-left of the bounding box
             let tagText = element.ref as NSString
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
@@ -105,7 +116,9 @@ public final class SoMAnnotator: @unchecked Sendable {
         in ctx: CGContext,
         pixelWidth: Int,
         pixelHeight: Int,
-        scaleFactor: Double
+        scaleFactor: Double,
+        originX: Int,
+        originY: Int
     ) {
         let logicalWidth = Int(Double(pixelWidth) / scaleFactor)
         let logicalHeight = Int(Double(pixelHeight) / scaleFactor)
@@ -115,25 +128,24 @@ public final class SoMAnnotator: @unchecked Sendable {
             .foregroundColor: NSColor(calibratedWhite: 1.0, alpha: 0.9)
         ]
 
-        // Top horizontal bar
         let barThickness = CGFloat(18.0 * scaleFactor)
         ctx.setFillColor(NSColor(calibratedWhite: 0.08, alpha: 0.65).cgColor)
         ctx.fill(CGRect(x: 0, y: CGFloat(pixelHeight) - barThickness, width: CGFloat(pixelWidth), height: barThickness))
 
-        for xPt in stride(from: 200, to: logicalWidth, by: 200) {
-            let px = CGFloat(Double(xPt) * scaleFactor)
+        for localXPt in stride(from: 200, to: logicalWidth, by: 200) {
+            let px = CGFloat(Double(localXPt) * scaleFactor)
             ctx.setStrokeColor(NSColor(calibratedWhite: 0.85, alpha: 0.7).cgColor)
             ctx.setLineWidth(CGFloat(1.0 * scaleFactor))
             ctx.move(to: CGPoint(x: px, y: CGFloat(pixelHeight)))
             ctx.addLine(to: CGPoint(x: px, y: CGFloat(pixelHeight) - barThickness))
             ctx.strokePath()
-            let label = "x:\(xPt)" as NSString
+            let label = "x:\(originX + localXPt)" as NSString
             label.draw(at: NSPoint(x: px + 4, y: CGFloat(pixelHeight) - barThickness + 2), withAttributes: attrs)
         }
 
-        for yPt in stride(from: 200, to: logicalHeight, by: 200) {
-            let py = CGFloat(Double(pixelHeight) - Double(yPt) * scaleFactor)
-            let label = "y:\(yPt)" as NSString
+        for localYPt in stride(from: 200, to: logicalHeight, by: 200) {
+            let py = CGFloat(Double(pixelHeight) - Double(localYPt) * scaleFactor)
+            let label = "y:\(originY + localYPt)" as NSString
             let size = label.size(withAttributes: attrs)
             let pillRect = CGRect(x: 2, y: py - size.height / 2 - 2, width: size.width + 8, height: size.height + 4)
             ctx.setFillColor(NSColor(calibratedWhite: 0.08, alpha: 0.65).cgColor)

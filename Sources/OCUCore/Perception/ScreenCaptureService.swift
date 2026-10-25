@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import CoreGraphics
+import ScreenCaptureKit
 import ImageIO
 import UniformTypeIdentifiers
 
@@ -9,8 +10,20 @@ public final class ScreenCaptureService: @unchecked Sendable {
 
     private init() {}
 
-    public func captureMainDisplayImage() throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
-        let logicalBounds = PermissionManager.shared.mainScreenBounds()
+    /// Captures the display containing `targetRect` (or main display if nil) using native ScreenCaptureKit
+    /// in-process (excluding OpenComputerUse's own HUD overlay), with fallback to `/usr/sbin/screencapture`.
+    public func captureDisplayImage(for targetRect: ScreenRect? = nil) throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
+        let targetPoint = targetRect?.center ?? PermissionManager.shared.mainScreenBounds().center
+        let displayInfo = PermissionManager.shared.displayContaining(point: targetPoint)
+
+        // 1. Try native in-process ScreenCaptureKit capture first
+        if let scResult = captureViaScreenCaptureKit(displayID: displayInfo.id, fallbackBounds: displayInfo.bounds, scale: displayInfo.scale) {
+            return scResult
+        }
+
+        // 2. Fallback to /usr/sbin/screencapture -D <index>
+        let allDisplays = PermissionManager.shared.allDisplayBounds()
+        let displayIndex = (allDisplays.firstIndex(where: { $0.id == displayInfo.id }) ?? 0) + 1
         let tempURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("ocu-raw-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(6)).png")
         defer {
@@ -19,19 +32,10 @@ public final class ScreenCaptureService: @unchecked Sendable {
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        // -x: silent (no shutter sound), -m: main monitor only, -t png
-        process.arguments = ["-x", "-m", "-t", "png", tempURL.path]
+        process.arguments = ["-x", "-D", "\(displayIndex)", "-t", "png", tempURL.path]
 
-        do {
-            try process.run()
-            process.waitUntilExit()
-        } catch {
-            throw OCUError(
-                code: .captureFailed,
-                message: "Failed to invoke /usr/sbin/screencapture: \(error.localizedDescription)",
-                recoveryHint: "Grant Screen Recording permission in System Settings > Privacy & Security > Screen Recording."
-            )
-        }
+        try? process.run()
+        process.waitUntilExit()
 
         guard process.terminationStatus == 0,
               FileManager.default.fileExists(atPath: tempURL.path),
@@ -39,13 +43,67 @@ public final class ScreenCaptureService: @unchecked Sendable {
               let cgImage = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
             throw OCUError(
                 code: .captureFailed,
-                message: "Screen capture produced no image (Screen Recording permission may be missing).",
-                recoveryHint: "Open System Settings > Privacy & Security > Screen Recording and enable OpenComputerUse or your terminal."
+                message: "Screen capture failed for display \(displayInfo.id).",
+                recoveryHint: "Grant Screen Recording permission in System Settings > Privacy & Security > Screen Recording."
             )
         }
 
-        let scale = logicalBounds.width > 0 ? Double(cgImage.width) / logicalBounds.width : 2.0
-        return (cgImage, logicalBounds, scale)
+        let scale = displayInfo.bounds.width > 0 ? Double(cgImage.width) / displayInfo.bounds.width : displayInfo.scale
+        return (cgImage, displayInfo.bounds, scale)
+    }
+
+    private func captureViaScreenCaptureKit(
+        displayID: CGDirectDisplayID,
+        fallbackBounds: ScreenRect,
+        scale: Double
+    ) -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double)? {
+        let semaphore = DispatchSemaphore(value: 0)
+        var captured: CGImage? = nil
+        var resolvedBounds = fallbackBounds
+        var resolvedScale = scale
+
+        Task.detached {
+            defer { semaphore.signal() }
+            do {
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
+                    return
+                }
+                let displayRect = ScreenRect(scDisplay.frame)
+                resolvedBounds = displayRect
+
+                // Exclude OpenComputerUse's own HUD overlay from screenshots
+                let excludedApps = content.applications.filter {
+                    $0.bundleIdentifier == "org.opencomputeruse.app"
+                }
+                let filter = SCContentFilter(
+                    display: scDisplay,
+                    excludingApplications: excludedApps,
+                    exceptingWindows: []
+                )
+                let config = SCStreamConfiguration()
+                let pixelW = Int( Double(scDisplay.width) * scale )
+                let pixelH = Int( Double(scDisplay.height) * scale )
+                config.width = max(scDisplay.width, pixelW)
+                config.height = max(scDisplay.height, pixelH)
+                config.showsCursor = false
+
+                let img = try await SCScreenshotManager.captureImage(
+                    contentFilter: filter,
+                    configuration: config
+                )
+                captured = img
+                if displayRect.width > 0 {
+                    resolvedScale = Double(img.width) / displayRect.width
+                }
+            } catch {
+                return
+            }
+        }
+
+        _ = semaphore.wait(timeout: .now() + 2.5)
+        guard let finalImage = captured else { return nil }
+        return (finalImage, resolvedBounds, resolvedScale)
     }
 
     public func savePNG(_ image: CGImage, to path: String) throws {

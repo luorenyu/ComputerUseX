@@ -11,18 +11,20 @@ public final class MouseController: @unchecked Sendable {
         to destination: ScreenPoint,
         duration: TimeInterval = 0.18
     ) throws {
+        KillSwitchMonitor.shared.clearAgentMouseTracking()
         try KillSwitchMonitor.shared.verifySafeToProceed()
         let start = PermissionManager.shared.currentMouseLocation()
         let distance = start.distance(to: destination)
 
         if distance < 2.0 {
             postMouseMove(to: destination)
+            KillSwitchMonitor.shared.recordAgentMousePosition(destination)
             return
         }
 
-        let steps = max(6, min(28, Int(distance / 28.0) + 8))
+        let steps = max(6, min(24, Int(distance / 40.0) + 6))
         let points = CubicBezierTrajectory.sample(from: start, to: destination, steps: steps)
-        let stepInterval = max(0.004, duration / Double(points.count))
+        let stepInterval = max(0.005, duration / Double(points.count))
 
         KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
         KillSwitchMonitor.shared.emitHUDEvent(.pointerTrail(points: [start] + points))
@@ -268,6 +270,8 @@ public final class MouseController: @unchecked Sendable {
     }
 
     private func postMouseMove(to point: ScreenPoint) {
+        CGWarpMouseCursorPosition(point.cgPoint)
+        CGAssociateMouseAndMouseCursorPosition(1)
         if let moveEvent = CGEvent(
             mouseEventSource: nil,
             mouseType: .mouseMoved,

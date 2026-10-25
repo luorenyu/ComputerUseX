@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import ApplicationServices
+import CoreGraphics
 
 public final class AXScanner: @unchecked Sendable {
     public static let shared = AXScanner()
@@ -13,7 +14,7 @@ public final class AXScanner: @unchecked Sendable {
         "AXPopUpButton", "AXComboBox", "AXMenuButton", "AXMenuItem", "AXMenuBarItem",
         "AXLink", "AXTabGroup", "AXRadioGroup", "AXSlider", "AXIncrementor",
         "AXSwitch", "AXDisclosureTriangle", "AXColorWell", "AXSegmentedControl",
-        "AXSearchField", "AXToolbarButton"
+        "AXSearchField", "AXToolbarButton", "AXRow", "AXCell"
     ]
 
     private let containerRolesToTraverse: Set<String> = [
@@ -41,9 +42,16 @@ public final class AXScanner: @unchecked Sendable {
 
     public func scanApplication(
         appNameFilter: String? = nil,
-        maxDepth: Int = 14,
-        maxElements: Int = 180
-    ) -> (appName: String, pid: Int32, windowTitle: String?, elements: [UIElementRef], rawAXMap: [String: AXUIElement]) {
+        maxDepth: Int = 16,
+        maxElements: Int = 220
+    ) -> (
+        appName: String,
+        pid: Int32,
+        windowTitle: String?,
+        windowFrame: ScreenRect?,
+        elements: [UIElementRef],
+        rawAXMap: [String: AXUIElement]
+    ) {
         let workspace = NSWorkspace.shared
         let targetApp: NSRunningApplication?
 
@@ -61,20 +69,26 @@ public final class AXScanner: @unchecked Sendable {
         }
 
         guard let app = targetApp else {
-            return (appNameFilter ?? "Unknown", 0, nil, [], [:])
+            return (appNameFilter ?? "Unknown", 0, nil, nil, [], [:])
         }
 
         let appName = app.localizedName ?? app.bundleIdentifier ?? "App"
         let pid = app.processIdentifier
         let axApp = AXUIElementCreateApplication(pid)
-        AXUIElementSetMessagingTimeout(axApp, 0.8)
+        AXUIElementSetMessagingTimeout(axApp, 0.9)
 
-        let screenBounds = PermissionManager.shared.mainScreenBounds()
+        // Enable accessibility tree generation for Electron / Chromium / Qt / WeChat apps
+        AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+
+        let desktopBounds = PermissionManager.shared.desktopBounds()
         var windowTitle: String? = nil
+        var primaryWindowFrame: ScreenRect? = nil
         var roots: [AXUIElement] = []
 
         if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String) {
             windowTitle = copyStringAttribute(focusedWindow, kAXTitleAttribute as String)
+            primaryWindowFrame = copyFrame(focusedWindow)
             roots.append(focusedWindow)
         }
 
@@ -83,21 +97,36 @@ public final class AXScanner: @unchecked Sendable {
                 if windowTitle == nil {
                     windowTitle = copyStringAttribute(win, kAXTitleAttribute as String)
                 }
+                if primaryWindowFrame == nil {
+                    primaryWindowFrame = copyFrame(win)
+                }
                 roots.append(win)
             }
         }
 
-        if let menuBar: AXUIElement = copyAttribute(axApp, kAXMenuBarAttribute as String) {
-            roots.append(menuBar)
+        // Fallback to CGWindowList bounds if AXWindow frame was not reported
+        if primaryWindowFrame == nil {
+            let appWindows = AppWorkspaceController.shared.listRunningApps()
+                .first(where: { $0.pid == pid })?.windows ?? []
+            if let firstWin = appWindows.first {
+                primaryWindowFrame = firstWin.frame
+                if windowTitle == nil || windowTitle?.isEmpty == true {
+                    windowTitle = firstWin.title
+                }
+            }
         }
 
         if roots.isEmpty {
             roots.append(axApp)
         }
 
+        if let menuBar: AXUIElement = copyAttribute(axApp, kAXMenuBarAttribute as String) {
+            roots.append(menuBar)
+        }
+
         var collected: [(UIElementRef, AXUIElement)] = []
         var visitedHashes = Set<CFHashCode>()
-        let deadline = Date().addingTimeInterval(1.6)
+        let deadline = Date().addingTimeInterval(1.8)
 
         func traverse(_ element: AXUIElement, depth: Int) {
             guard depth <= maxDepth,
@@ -115,18 +144,19 @@ public final class AXScanner: @unchecked Sendable {
             let title = copyStringAttribute(element, kAXTitleAttribute as String)
             let desc = copyStringAttribute(element, kAXDescriptionAttribute as String)
             let help = copyStringAttribute(element, kAXHelpAttribute as String)
+            let placeholder = copyStringAttribute(element, kAXPlaceholderValueAttribute as String)
             let valueStr = copyValueAsString(element)
             let enabled = copyBoolAttribute(element, kAXEnabledAttribute as String) ?? true
             let focused = copyBoolAttribute(element, kAXFocusedAttribute as String) ?? false
 
             if let rect = copyFrame(element) {
                 let isOnScreen = rect.width >= 6 && rect.height >= 6 &&
-                    rect.intersectionArea(with: screenBounds) > 0 &&
-                    rect.width <= screenBounds.width * 0.99 &&
-                    rect.height <= screenBounds.height * 0.99
+                    rect.intersectionArea(with: desktopBounds) > 0 &&
+                    rect.width <= desktopBounds.width * 0.98 &&
+                    rect.height <= desktopBounds.height * 0.98
 
                 if isOnScreen {
-                    let displayLabel = [title, desc, valueStr, help]
+                    let displayLabel = [title, desc, placeholder, valueStr, help]
                         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .first(where: { !$0.isEmpty }) ?? ""
 
@@ -138,10 +168,17 @@ public final class AXScanner: @unchecked Sendable {
 
                     let isMeaningfulText = (role == "AXStaticText" && !displayLabel.isEmpty && displayLabel.count <= 120)
 
-                    if isInteractive || isMeaningfulText {
+                    // For rows/cells, only include if they have a non-empty label or reasonable height
+                    let shouldKeep: Bool
+                    if role == "AXRow" || role == "AXCell" {
+                        shouldKeep = !displayLabel.isEmpty && rect.height <= 120
+                    } else {
+                        shouldKeep = isInteractive || isMeaningfulText
+                    }
+
+                    if shouldKeep {
                         let friendlyRole = normalizeRole(role: role, subrole: subrole)
                         let finalLabel = displayLabel.isEmpty ? friendlyRole : displayLabel
-                        // Avoid duplicate identical frame + label
                         let isDuplicate = collected.contains { existing in
                             existing.0.label == finalLabel &&
                             existing.0.frame.intersectionOverUnion(with: rect) > 0.85
@@ -166,21 +203,19 @@ public final class AXScanner: @unchecked Sendable {
                 }
             }
 
-            // Traverse children if within depth limit
-            if containerRolesToTraverse.contains(role) || depth < 5 {
+            if containerRolesToTraverse.contains(role) || depth < 6 {
                 if let children: [AXUIElement] = copyAttribute(element, kAXChildrenAttribute as String) {
-                    for child in children.prefix(80) {
+                    for child in children.prefix(100) {
                         traverse(child, depth: depth + 1)
                     }
                 }
             }
         }
 
-        for root in roots.prefix(4) {
+        for root in roots.prefix(5) {
             traverse(root, depth: 0)
         }
 
-        // Sort elements top-to-bottom, left-to-right for natural reading order
         collected.sort { a, b in
             let rowA = Int(a.0.frame.y / 18.0)
             let rowB = Int(b.0.frame.y / 18.0)
@@ -204,7 +239,7 @@ public final class AXScanner: @unchecked Sendable {
         liveElementMap = newMap
         lock.unlock()
 
-        return (appName, pid, windowTitle, indexedElements, newMap)
+        return (appName, pid, windowTitle, primaryWindowFrame, indexedElements, newMap)
     }
 
     public func updateLiveElementMap(_ map: [String: AXUIElement]) {
@@ -214,7 +249,7 @@ public final class AXScanner: @unchecked Sendable {
     }
 
     private func normalizeRole(role: String, subrole: String?) -> String {
-        if let sub = subrole, sub.hasPrefix("AX") && sub.hasSuffix("Button") {
+        if let sub = subrole, sub.hasPrefix("AX") && (sub.hasSuffix("Button") || sub.hasSuffix("Field")) {
             return String(sub.dropFirst(2)).lowercased()
         }
         if role.hasPrefix("AX") {

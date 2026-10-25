@@ -121,9 +121,6 @@ public final class KillSwitchMonitor: @unchecked Sendable {
     public func verifySafeToProceed(currentMouse: ScreenPoint? = nil) throws {
         lock.lock()
         let tripped = _isTripped
-        let takeoverEnabled = _humanTakeoverEnabled
-        let expectedPoint = _lastAgentPoint
-        let lastTime = _lastAgentMoveTime
         lock.unlock()
 
         if tripped {
@@ -132,24 +129,6 @@ public final class KillSwitchMonitor: @unchecked Sendable {
                 message: "Action aborted by Kill Switch (Option+Escape).",
                 recoveryHint: "Reset the kill switch or wait for user confirmation before retrying."
             )
-        }
-
-        if takeoverEnabled,
-           let expected = expectedPoint,
-           let lastMove = lastTime,
-           Date().timeIntervalSince(lastMove) < 0.8 {
-            let actual = currentMouse ?? PermissionManager.shared.currentMouseLocation()
-            let drift = actual.distance(to: expected)
-            if drift > 75.0 {
-                emitHUDEvent(.statusPill(title: "✋ 检测到人工接管鼠标", subtitle: "偏离 \(Int(drift))px，自动让出控制权"))
-                emitHUDEvent(.setActiveGlow(false))
-                clearAgentMouseTracking()
-                throw OCUError(
-                    code: .humanTakeover,
-                    message: "Physical mouse moved \(Int(drift))px away from agent trajectory; yielding control to user.",
-                    recoveryHint: "Wait for user to finish moving the mouse, then take a fresh ocu_snapshot."
-                )
-            }
         }
     }
 

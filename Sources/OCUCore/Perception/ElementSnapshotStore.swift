@@ -34,38 +34,47 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             .statusPill(title: "🔍 正在扫描界面元素 (Snapshot)...", subtitle: appName ?? "当前窗口")
         )
 
-        let screenBounds = PermissionManager.shared.mainScreenBounds()
-        var scaleFactor = PermissionManager.shared.mainScreenScaleFactor()
-
         // 1. Scan Accessibility Tree
         let axScan = AXScanner.shared.scanApplication(appNameFilter: appName)
         var axElements = axScan.elements
         var ocrElements: [UIElementRef] = []
         var capturedImage: CGImage? = nil
+        var displayBounds = PermissionManager.shared.displayContaining(
+            point: axScan.windowFrame?.center ?? PermissionManager.shared.mainScreenBounds().center
+        ).bounds
+        var scaleFactor = PermissionManager.shared.mainScreenScaleFactor()
 
-        // 2. Capture Screen if OCR, SoM, or outputPath is requested (or if AX tree yielded very few elements)
-        let needsScreenImage = enableOCR || enableSoM || (outputPath != nil) || includeBase64 || (axElements.count < 5)
+        // 2. Capture the display containing the target window if OCR, SoM, or outputPath is requested
+        let needsScreenImage = enableOCR || enableSoM || (outputPath != nil) || includeBase64 || (axElements.count < 12)
         if needsScreenImage {
-            if let capture = try? ScreenCaptureService.shared.captureMainDisplayImage() {
+            if let capture = try? ScreenCaptureService.shared.captureDisplayImage(for: axScan.windowFrame) {
                 capturedImage = capture.image
+                displayBounds = capture.logicalBounds
                 scaleFactor = capture.scaleFactor
             }
         }
 
         // 3. Run Apple Vision OCR supplemental detection if requested or AX elements are sparse
-        if (enableOCR || axElements.count < 5), let img = capturedImage {
-            let candidates = VisionOCRScanner.shared.recognizeTextElements(
+        if (enableOCR || axElements.count < 12), let img = capturedImage {
+            var candidates = VisionOCRScanner.shared.recognizeTextElements(
                 in: img,
-                screenBounds: screenBounds,
+                screenBounds: displayBounds,
                 appName: axScan.appName,
                 pid: axScan.pid,
                 windowTitle: axScan.windowTitle
             )
+            // If we know the target window's bounding box, prioritize OCR candidates inside that window
+            if let winRect = axScan.windowFrame {
+                let inWindow = candidates.filter { $0.frame.intersectionArea(with: winRect) > 0 }
+                if !inWindow.isEmpty {
+                    candidates = inWindow
+                }
+            }
+
             let merged = VisionOCRScanner.mergeElements(axElements: axElements, ocrCandidates: candidates)
             ocrElements = merged.filter { $0.source == .ocr }
             axElements = merged.filter { $0.source == .ax }
 
-            // Update AXScanner live map keys in case indices shifted (AX elements stay @e1..@eK)
             var updatedAXMap: [String: AXUIElement] = [:]
             for el in axElements {
                 if let raw = axScan.rawAXMap[el.ref] {
@@ -87,7 +96,8 @@ public final class ElementSnapshotStore: @unchecked Sendable {
                 if let annotated = SoMAnnotator.shared.annotateImage(
                     img,
                     elements: allElements,
-                    scaleFactor: scaleFactor
+                    scaleFactor: scaleFactor,
+                    displayBounds: displayBounds
                 ) {
                     let targetOut = outputPath ?? cacheDirectory.appendingPathComponent("latest_som.png").path
                     try? ScreenCaptureService.shared.savePNG(annotated, to: targetOut)
@@ -111,7 +121,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             activeApp: axScan.appName,
             activePid: axScan.pid,
             windowTitle: axScan.windowTitle,
-            screenBounds: screenBounds,
+            screenBounds: displayBounds,
             scaleFactor: scaleFactor,
             axCount: axElements.count,
             ocrCount: ocrElements.count,
@@ -136,7 +146,6 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         latestSnapshot = snapshot
         lock.unlock()
 
-        // Persist without bulky base64 string so CLI calls can resolve @eX quickly
         var diskCopy = snapshot
         diskCopy.imageBase64 = nil
         if let data = try? JSONEncoder().encode(diskCopy) {
@@ -157,7 +166,6 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         return latestSnapshot
     }
 
-    /// Resolves a target string (`"@e3"`, `"e3"`, or fuzzy label query) into a `UIElementRef`.
     public func resolveTarget(_ target: String) throws -> UIElementRef {
         let trimmed = target.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -174,7 +182,6 @@ public final class ElementSnapshotStore: @unchecked Sendable {
                 return exactRef
             }
 
-            // Fuzzy match by label if target is not an @eX reference
             let lowerQuery = trimmed.lowercased()
             if let exactLabel = snapshot.elements.first(where: { $0.label.lowercased() == lowerQuery }) {
                 return exactLabel
@@ -184,7 +191,6 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             }
         }
 
-        // Auto-refresh snapshot once if element was not found
         let freshSnapshot = try captureSnapshot(enableOCR: true, enableSoM: false)
         let normalizedRef = trimmed.hasPrefix("@") ? trimmed.lowercased() : "@\(trimmed.lowercased())"
         if let exactRef = freshSnapshot.elements.first(where: { $0.ref.lowercased() == normalizedRef }) {

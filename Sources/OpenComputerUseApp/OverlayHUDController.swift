@@ -126,36 +126,48 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
 public final class OverlayHUDWindowController: @unchecked Sendable {
     public static let shared = OverlayHUDWindowController()
     public let viewModel = HUDViewModel()
-    private var panel: NSPanel?
+    private var panels: [NSPanel] = []
 
     private init() {}
 
     public func setupOverlayWindow() {
         DispatchQueue.main.async {
-            guard self.panel == nil else { return }
-            let screenFrame = NSScreen.main?.frame ?? CGRect(x: 0, y: 0, width: 1440, height: 900)
+            guard self.panels.isEmpty else { return }
+            for screen in NSScreen.screens {
+                let screenNumber = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
+                let cgBounds = CGDisplayBounds(screenNumber)
+                let originOffset = ScreenPoint(x: Double(cgBounds.origin.x), y: Double(cgBounds.origin.y))
 
-            let overlayPanel = NSPanel(
-                contentRect: screenFrame,
-                styleMask: [.borderless, .nonactivatingPanel],
-                backing: .buffered,
-                defer: false
-            )
-            overlayPanel.isOpaque = false
-            overlayPanel.backgroundColor = .clear
-            overlayPanel.hasShadow = false
-            overlayPanel.ignoresMouseEvents = true
-            overlayPanel.level = .screenSaver
-            overlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-            overlayPanel.contentView = NSHostingView(rootView: OverlayHUDRootView(viewModel: self.viewModel))
-            overlayPanel.orderFrontRegardless()
-            self.panel = overlayPanel
+                let overlayPanel = NSPanel(
+                    contentRect: screen.frame,
+                    styleMask: [.borderless, .nonactivatingPanel],
+                    backing: .buffered,
+                    defer: false
+                )
+                overlayPanel.isOpaque = false
+                overlayPanel.backgroundColor = .clear
+                overlayPanel.hasShadow = false
+                overlayPanel.ignoresMouseEvents = true
+                overlayPanel.level = .screenSaver
+                overlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+                overlayPanel.contentView = NSHostingView(
+                    rootView: OverlayHUDRootView(viewModel: self.viewModel, screenOrigin: originOffset)
+                )
+                overlayPanel.orderFrontRegardless()
+                self.panels.append(overlayPanel)
+            }
         }
     }
 }
 
 struct OverlayHUDRootView: View {
     @ObservedObject var viewModel: HUDViewModel
+    let screenOrigin: ScreenPoint
+
+    init(viewModel: HUDViewModel, screenOrigin: ScreenPoint = ScreenPoint(x: 0, y: 0)) {
+        self.viewModel = viewModel
+        self.screenOrigin = screenOrigin
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -186,25 +198,35 @@ struct OverlayHUDRootView: View {
                     Canvas { context, _ in
                         var path = Path()
                         for (idx, pt) in viewModel.trailPoints.enumerated() {
-                            let cgPt = CGPoint(x: pt.x, y: pt.y)
+                            let cgPt = CGPoint(x: pt.x - screenOrigin.x, y: pt.y - screenOrigin.y)
                             if idx == 0 {
                                 path.move(to: cgPt)
                             } else {
                                 path.addLine(to: cgPt)
                             }
                         }
+                        let firstLocal = CGPoint(
+                            x: (viewModel.trailPoints.first?.x ?? 0) - screenOrigin.x,
+                            y: (viewModel.trailPoints.first?.y ?? 0) - screenOrigin.y
+                        )
+                        let lastLocal = CGPoint(
+                            x: (viewModel.trailPoints.last?.x ?? 0) - screenOrigin.x,
+                            y: (viewModel.trailPoints.last?.y ?? 0) - screenOrigin.y
+                        )
                         context.stroke(
                             path,
                             with: .linearGradient(
                                 Gradient(colors: [Color.cyan.opacity(0.15), Color.cyan.opacity(0.9)]),
-                                startPoint: viewModel.trailPoints.first?.cgPoint ?? .zero,
-                                endPoint: viewModel.trailPoints.last?.cgPoint ?? .zero
+                                startPoint: firstLocal,
+                                endPoint: lastLocal
                             ),
                             style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round)
                         )
 
                         if let head = viewModel.trailPoints.last {
-                            let haloRect = CGRect(x: head.x - 12, y: head.y - 12, width: 24, height: 24)
+                            let hx = head.x - screenOrigin.x
+                            let hy = head.y - screenOrigin.y
+                            let haloRect = CGRect(x: hx - 12, y: hy - 12, width: 24, height: 24)
                             context.fill(Path(ellipseIn: haloRect), with: .color(Color.cyan.opacity(0.28)))
                             context.stroke(Path(ellipseIn: haloRect), with: .color(Color.cyan), lineWidth: 2)
                         }
@@ -230,13 +252,19 @@ struct OverlayHUDRootView: View {
                                 .offset(y: -22)
                         }
                     }
-                    .position(x: rect.x + rect.width / 2.0, y: rect.y + rect.height / 2.0)
+                    .position(
+                        x: (rect.x - screenOrigin.x) + rect.width / 2.0,
+                        y: (rect.y - screenOrigin.y) + rect.height / 2.0
+                    )
                 }
 
                 // 4. Click Ripples
                 ForEach(viewModel.ripples) { ripple in
                     ClickRippleView(ripple: ripple)
-                        .position(x: ripple.point.x, y: ripple.point.y)
+                        .position(
+                            x: ripple.point.x - screenOrigin.x,
+                            y: ripple.point.y - screenOrigin.y
+                        )
                 }
 
                 // 5. Floating Bottom Status Pill
