@@ -47,8 +47,28 @@ public final class AppWorkspaceController: @unchecked Sendable {
             (app.bundleIdentifier?.lowercased() == lower) ||
             (app.localizedName?.lowercased().contains(lower) == true)
         }) {
+            running.unhide()
             running.activate()
-            Thread.sleep(forTimeInterval: 0.18)
+            let axApp = AXUIElementCreateApplication(running.processIdentifier)
+            var winsRef: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &winsRef) == .success,
+               let wins = winsRef as? [AXUIElement], !wins.isEmpty {
+                let unminimizedWins = wins.filter { w in
+                    var minRef: CFTypeRef?
+                    if AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success,
+                       let isMin = minRef as? Bool {
+                        return !isMin
+                    }
+                    return true
+                }
+                if unminimizedWins.isEmpty, let firstMin = wins.first {
+                    AXUIElementSetAttributeValue(firstMin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+                    AXUIElementPerformAction(firstMin, kAXRaiseAction as CFString)
+                } else if let topWin = unminimizedWins.first {
+                    AXUIElementPerformAction(topWin, kAXRaiseAction as CFString)
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.22)
             let name = running.localizedName ?? identifierOrName
             KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🪟 已激活应用: \(name)", subtitle: nil))
             return ActionOutcome(

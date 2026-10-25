@@ -236,21 +236,14 @@ public final class MouseController: @unchecked Sendable {
             KillSwitchMonitor.shared.emitHUDEvent(
                 .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: true)
             )
-            // If element is AX and has no offset, also try native AXPress alongside or before synthesized click
-            var handledByAX = false
-            if !hasOffset, let el = resolvedElement, el.source == .ax, button == .left, clickCount == 1 {
-                handledByAX = AXScanner.shared.performNativePress(ref: el.ref)
-            }
-            if !handledByAX {
-                SyntheticFocusEnforcer.shared.performBackgroundClick(
-                    at: targetPoint,
-                    button: button,
-                    clickCount: clickCount,
-                    pid: wc.pid,
-                    windowID: wc.windowID,
-                    windowBounds: wc.bounds
-                )
-            }
+            SyntheticFocusEnforcer.shared.performBackgroundClick(
+                at: targetPoint,
+                button: button,
+                clickCount: clickCount,
+                pid: wc.pid,
+                windowID: wc.windowID,
+                windowBounds: wc.bounds
+            )
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.14) {
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: false)

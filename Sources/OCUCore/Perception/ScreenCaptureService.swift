@@ -93,13 +93,15 @@ public final class ScreenCaptureService: @unchecked Sendable {
                         win.frame.width >= 120 &&
                         win.frame.height >= 120
                     }
+                    let onScreenPool = appWindows.filter(\.isOnScreen)
+                    let candidatePool = onScreenPool.isEmpty ? appWindows : onScreenPool
                     let matchedWindow: SCWindow? = {
                         if let tr = targetRect {
-                            return appWindows.max(by: { a, b in
+                            return candidatePool.max(by: { a, b in
                                 ScreenRect(a.frame).intersectionArea(with: tr) < ScreenRect(b.frame).intersectionArea(with: tr)
                             })
                         }
-                        return appWindows.max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
+                        return candidatePool.max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
                     }()
 
                     if let scWin = matchedWindow {

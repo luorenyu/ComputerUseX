@@ -86,22 +86,26 @@ public final class AXScanner: @unchecked Sendable {
         var primaryWindowFrame: ScreenRect? = nil
         var roots: [AXUIElement] = []
 
-        if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String) {
+        let allWindows: [AXUIElement] = copyAttribute(axApp, kAXWindowsAttribute as String) ?? []
+        let visibleWindows = allWindows.filter { win in
+            let isMin: Bool = copyAttribute(win, kAXMinimizedAttribute as String) ?? false
+            return !isMin
+        }
+
+        if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String),
+           (copyAttribute(focusedWindow, kAXMinimizedAttribute as String) as Bool? ?? false) == false {
             windowTitle = copyStringAttribute(focusedWindow, kAXTitleAttribute as String)
             primaryWindowFrame = copyFrame(focusedWindow)
             roots.append(focusedWindow)
-        }
-
-        if let windows: [AXUIElement] = copyAttribute(axApp, kAXWindowsAttribute as String) {
-            for win in windows where !roots.contains(where: { CFEqual($0, win) }) {
-                if windowTitle == nil {
-                    windowTitle = copyStringAttribute(win, kAXTitleAttribute as String)
-                }
-                if primaryWindowFrame == nil {
-                    primaryWindowFrame = copyFrame(win)
-                }
-                roots.append(win)
-            }
+        } else if let mainWindow: AXUIElement = copyAttribute(axApp, kAXMainWindowAttribute as String),
+                  (copyAttribute(mainWindow, kAXMinimizedAttribute as String) as Bool? ?? false) == false {
+            windowTitle = copyStringAttribute(mainWindow, kAXTitleAttribute as String)
+            primaryWindowFrame = copyFrame(mainWindow)
+            roots.append(mainWindow)
+        } else if let firstVisible = visibleWindows.first ?? allWindows.first {
+            windowTitle = copyStringAttribute(firstVisible, kAXTitleAttribute as String)
+            primaryWindowFrame = copyFrame(firstVisible)
+            roots.append(firstVisible)
         }
 
         // Fallback to CGWindowList bounds if AXWindow frame was not reported

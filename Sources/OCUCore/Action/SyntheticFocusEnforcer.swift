@@ -109,6 +109,36 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         return nil
     }
 
+    /// Returns true if the topmost visible on-screen window containing `point` belongs to `pid`.
+    public func isPointUnoccludedOnScreen(at point: ScreenPoint, forPid pid: Int32) -> Bool {
+        guard let onScreenList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let selfPid = ProcessInfo.processInfo.processIdentifier
+        for dict in onScreenList {
+            guard let ownerPid = dict[kCGWindowOwnerPID as String] as? Int32,
+                  ownerPid != selfPid,
+                  let layer = dict[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let boundsDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
+                continue
+            }
+            let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
+            if ownerName.lowercased().contains("opencomputeruse") { continue }
+            let rect = ScreenRect(
+                x: Double(boundsDict["X"] ?? 0),
+                y: Double(boundsDict["Y"] ?? 0),
+                width: Double(boundsDict["Width"] ?? 0),
+                height: Double(boundsDict["Height"] ?? 0)
+            )
+            guard rect.width >= 80, rect.height >= 80 else { continue }
+            if rect.contains(point) {
+                return ownerPid == pid
+            }
+        }
+        return false
+    }
+
     /// Sends synthetic `kCGEventAppKitDefined` (`type = 13`, `subtype = 1` ApplicationActivated) events directly
     /// to `pid` so the background application believes it is active and key-focused without stealing OS focus.
     public func enforceBackgroundFocus(
@@ -246,13 +276,6 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
     ) {
         let savedMousePos = PermissionManager.shared.currentMouseLocation().cgPoint
 
-        enforceBackgroundFocus(
-            pid: pid,
-            windowID: windowID,
-            windowBounds: windowBounds,
-            activationPoint: point
-        )
-
         let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
             switch button {
             case .left: return (.leftMouseDown, .leftMouseUp, .left)
@@ -261,7 +284,59 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }()
 
-        // 1. Post window-targeted events directly to PID (works even for occluded Cocoa windows)
+        // 1. If the target point is unoccluded on screen (topmost on-screen window at point belongs to `pid`),
+        // perform an atomic micro-warp + HID event tap click, wait 35ms for WindowServer/Chromium to process
+        // the mouseUp event at `cgPt`, and then immediately restore the user's physical cursor.
+        if isPointUnoccludedOnScreen(at: point, forPid: pid) {
+            let cgPt = point.cgPoint
+            CGWarpMouseCursorPosition(cgPt)
+            CGAssociateMouseAndMouseCursorPosition(1)
+            if let moveEvent = CGEvent(
+                mouseEventSource: nil,
+                mouseType: .mouseMoved,
+                mouseCursorPosition: cgPt,
+                mouseButton: .left
+            ) {
+                moveEvent.post(tap: .cghidEventTap)
+            }
+            Thread.sleep(forTimeInterval: 0.010)
+            for i in 1...max(1, clickCount) {
+                if let downEvent = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: downType,
+                    mouseCursorPosition: cgPt,
+                    mouseButton: cgButton
+                ), let upEvent = CGEvent(
+                    mouseEventSource: nil,
+                    mouseType: upType,
+                    mouseCursorPosition: cgPt,
+                    mouseButton: cgButton
+                ) {
+                    downEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
+                    upEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
+                    downEvent.post(tap: .cghidEventTap)
+                    Thread.sleep(forTimeInterval: 0.025)
+                    upEvent.post(tap: .cghidEventTap)
+                }
+                if i < clickCount {
+                    Thread.sleep(forTimeInterval: 0.030)
+                }
+            }
+            // Wait 35ms before restoring cursor so asynchronous IPC apps (Chrome/Electron) receive mouseUp at cgPt
+            Thread.sleep(forTimeInterval: 0.035)
+            CGWarpMouseCursorPosition(savedMousePos)
+            CGAssociateMouseAndMouseCursorPosition(1)
+            return
+        }
+
+        // 2. Fallback for occluded background windows: post window-targeted events directly to PID
+        enforceBackgroundFocus(
+            pid: pid,
+            windowID: windowID,
+            windowBounds: windowBounds,
+            activationPoint: point
+        )
+
         postSynthesizedMouseEvent(
             type: .mouseMoved,
             button: .left,
@@ -292,34 +367,6 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 windowID: windowID,
                 windowBounds: windowBounds
             )
-        }
-
-        // 2. If the target point is unoccluded on screen (topmost window at point belongs to `pid`),
-        // also perform an instantaneous (<15ms) HID event tap click and immediately restore the physical cursor
-        // so custom C++ UI frameworks (WeChat 4.x, Qt, games) that ignore postToPid also respond 100% reliably.
-        if let topWin = resolveTargetWindow(at: point), topWin.pid == pid {
-            let cgPt = point.cgPoint
-            for i in 1...max(1, clickCount) {
-                if let downEvent = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: downType,
-                    mouseCursorPosition: cgPt,
-                    mouseButton: cgButton
-                ), let upEvent = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: upType,
-                    mouseCursorPosition: cgPt,
-                    mouseButton: cgButton
-                ) {
-                    downEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
-                    upEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
-                    downEvent.post(tap: .cghidEventTap)
-                    Thread.sleep(forTimeInterval: 0.012)
-                    upEvent.post(tap: .cghidEventTap)
-                }
-            }
-            CGWarpMouseCursorPosition(savedMousePos)
-            CGAssociateMouseAndMouseCursorPosition(1)
         }
     }
 
