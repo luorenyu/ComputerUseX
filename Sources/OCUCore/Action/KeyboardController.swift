@@ -181,6 +181,14 @@ public final class KeyboardController: @unchecked Sendable {
 
     private func resolveTargetPid(forVirtualMode isVirtual: Bool) -> Int32? {
         guard isVirtual else { return nil }
+        // If the target window is visible/unoccluded at the virtual cursor location, prefer standard HID event tap
+        // (since performBackgroundClick already focused the target window at that point while preserving physical mouse).
+        let loc = MouseController.shared.currentVirtualOrPhysicalLocation
+        if let ctx = MouseController.shared.lastResolvedTargetContext,
+           let topWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(at: loc),
+           topWin.pid == ctx.pid {
+            return nil
+        }
         let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if let ctxPid = MouseController.shared.lastResolvedTargetContext?.pid, ctxPid != frontPid {
             return ctxPid

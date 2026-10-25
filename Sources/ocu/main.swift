@@ -82,12 +82,27 @@ struct OCUCLI {
         var flags: [String: String] = [:]
         var boolFlags: Set<String> = []
 
+        let knownBoolFlags: Set<String> = [
+            "compact", "som", "no-ocr", "full-screen",
+            "right", "middle", "double", "ax-native",
+            "virtual", "physical", "submit", "enter", "clear", "no-launch"
+        ]
+
         var i = 0
         while i < args.count {
             let token = args[i]
             if token.hasPrefix("--") {
                 let key = String(token.dropFirst(2))
-                if i + 1 < args.count && (!args[i + 1].hasPrefix("--")) {
+                if knownBoolFlags.contains(key) {
+                    if i + 1 < args.count && (args[i + 1] == "true" || args[i + 1] == "false") {
+                        if args[i + 1] == "true" { boolFlags.insert(key) }
+                        flags[key] = args[i + 1]
+                        i += 2
+                    } else {
+                        boolFlags.insert(key)
+                        i += 1
+                    }
+                } else if i + 1 < args.count && (!args[i + 1].hasPrefix("--")) {
                     flags[key] = args[i + 1]
                     i += 2
                 } else {

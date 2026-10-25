@@ -407,6 +407,8 @@ public final class MouseController: @unchecked Sendable {
         let steps = 8
         let stepDx = Int32((dx / Double(steps)).rounded())
         let stepDy = Int32((dy / Double(steps)).rounded())
+        let savedMousePos = PermissionManager.shared.currentMouseLocation().cgPoint
+        let scrollLoc = (targetPoint ?? currentVirtualOrPhysicalLocation).cgPoint
 
         for _ in 0..<steps {
             try KillSwitchMonitor.shared.verifySafeToProceed()
@@ -418,9 +420,14 @@ public final class MouseController: @unchecked Sendable {
                 wheel2: stepDx,
                 wheel3: 0
             ) {
+                scrollEvent.location = scrollLoc
                 scrollEvent.post(tap: .cghidEventTap)
             }
             Thread.sleep(forTimeInterval: 0.014)
+        }
+        if useVirtualCursorByDefault {
+            CGWarpMouseCursorPosition(savedMousePos)
+            CGAssociateMouseAndMouseCursorPosition(1)
         }
 
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
