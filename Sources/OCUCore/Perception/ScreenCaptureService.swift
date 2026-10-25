@@ -99,15 +99,51 @@ public final class ScreenCaptureService: @unchecked Sendable {
                 targetW = max(60, Int((Double(maxDimension) * aspect).rounded()))
             }
 
-            let filter = SCContentFilter(desktopIndependentWindow: scWin)
-            let config = SCStreamConfiguration()
-            config.width = targetW
-            config.height = targetH
-            config.showsCursor = false
-            config.ignoreShadowsSingleWindow = true
+            let ownerPid = scWin.owningApplication?.processID ?? 0
+            let siblingWindows = content.windows.filter {
+                $0.windowID != scWin.windowID &&
+                $0.owningApplication?.processID == ownerPid &&
+                $0.windowLayer == 0 &&
+                $0.frame.width >= 180 &&
+                $0.frame.height >= 180
+            }.sorted { a, b in
+                let aMatchesSize = abs(a.frame.width - scWin.frame.width) < 30 && abs(a.frame.height - scWin.frame.height) < 30
+                let bMatchesSize = abs(b.frame.width - scWin.frame.width) < 30 && abs(b.frame.height - scWin.frame.height) < 30
+                if aMatchesSize != bMatchesSize { return aMatchesSize }
+                return (a.frame.width * a.frame.height) > (b.frame.width * b.frame.height)
+            }
+            for candidate in [scWin] + siblingWindows {
+                let cRect = ScreenRect(candidate.frame)
+                let filter = SCContentFilter(desktopIndependentWindow: candidate)
+                let config = SCStreamConfiguration()
+                config.width = targetW
+                config.height = targetH
+                config.showsCursor = false
+                config.ignoreShadowsSingleWindow = true
 
-            if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
-                result = (img, winRect)
+                if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
+                   !self.isImageBlankOrBlack(img) {
+                    result = (img, cRect)
+                    return
+                }
+            }
+
+            // Fallback if desktopIndependentWindow returned a blank backing surface:
+            // capture the display containing scWin and crop strictly to winRect (single window only!)
+            if let scDisplay = content.displays.first(where: { ScreenRect($0.frame).intersectionArea(with: winRect) > 0 }) ?? content.displays.first {
+                let displayRect = ScreenRect(scDisplay.frame)
+                let excludedApps = content.applications.filter { $0.bundleIdentifier == "org.opencomputeruse.app" }
+                let dispFilter = SCContentFilter(display: scDisplay, excludingApplications: excludedApps, exceptingWindows: [])
+                let dispConfig = SCStreamConfiguration()
+                dispConfig.width = scDisplay.width
+                dispConfig.height = scDisplay.height
+                dispConfig.showsCursor = false
+                if let dispImg = try? await SCScreenshotManager.captureImage(contentFilter: dispFilter, configuration: dispConfig) {
+                    let actualScale = displayRect.width > 0 ? Double(dispImg.width) / displayRect.width : 1.0
+                    if let cropped = self.cropImage(dispImg, to: winRect, displayBounds: displayRect, scale: actualScale) {
+                        result = (cropped, winRect)
+                    }
+                }
             }
         }
 
@@ -162,23 +198,38 @@ public final class ScreenCaptureService: @unchecked Sendable {
                     }
 
                     if let scWin = matchedWindow {
-                        let winRect = ScreenRect(scWin.frame)
-                        let winFilter = SCContentFilter(desktopIndependentWindow: scWin)
-                        let winConfig = SCStreamConfiguration()
-                        let pw = max(Int(winRect.width), Int((winRect.width * scale).rounded()))
-                        let ph = max(Int(winRect.height), Int((winRect.height * scale).rounded()))
-                        winConfig.width = pw
-                        winConfig.height = ph
-                        winConfig.showsCursor = false
-                        winConfig.ignoreShadowsSingleWindow = true
-                        if let winImg = try? await SCScreenshotManager.captureImage(
-                            contentFilter: winFilter,
-                            configuration: winConfig
-                        ) {
-                            captured = winImg
-                            resolvedBounds = winRect
-                            resolvedScale = winRect.width > 0 ? Double(winImg.width) / winRect.width : scale
-                            return
+                        let ownerPid = scWin.owningApplication?.processID ?? pid ?? 0
+                        let siblingWindows = content.windows.filter {
+                            $0.windowID != scWin.windowID &&
+                            $0.owningApplication?.processID == ownerPid &&
+                            $0.windowLayer == 0 &&
+                            $0.frame.width >= 180 &&
+                            $0.frame.height >= 180
+                        }.sorted { a, b in
+                            let aMatchesSize = abs(a.frame.width - scWin.frame.width) < 30 && abs(a.frame.height - scWin.frame.height) < 30
+                            let bMatchesSize = abs(b.frame.width - scWin.frame.width) < 30 && abs(b.frame.height - scWin.frame.height) < 30
+                            if aMatchesSize != bMatchesSize { return aMatchesSize }
+                            return (a.frame.width * a.frame.height) > (b.frame.width * b.frame.height)
+                        }
+                        for candidate in [scWin] + siblingWindows {
+                            let winRect = ScreenRect(candidate.frame)
+                            let winFilter = SCContentFilter(desktopIndependentWindow: candidate)
+                            let winConfig = SCStreamConfiguration()
+                            let pw = max(Int(winRect.width), Int((winRect.width * scale).rounded()))
+                            let ph = max(Int(winRect.height), Int((winRect.height * scale).rounded()))
+                            winConfig.width = pw
+                            winConfig.height = ph
+                            winConfig.showsCursor = false
+                            winConfig.ignoreShadowsSingleWindow = true
+                            if let winImg = try? await SCScreenshotManager.captureImage(
+                                contentFilter: winFilter,
+                                configuration: winConfig
+                            ), !self.isImageBlankOrBlack(winImg) {
+                                captured = winImg
+                                resolvedBounds = winRect
+                                resolvedScale = winRect.width > 0 ? Double(winImg.width) / winRect.width : scale
+                                return
+                            }
                         }
                     }
                 }
@@ -228,6 +279,43 @@ public final class ScreenCaptureService: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 2.5)
         guard let finalImage = captured else { return nil }
         return (finalImage, resolvedBounds, resolvedScale)
+    }
+
+    /// Detects whether a captured CGImage is completely blank/black (e.g. an uncomposited shell window).
+    private func isImageBlankOrBlack(_ image: CGImage) -> Bool {
+        let w = image.width
+        let h = image.height
+        guard w >= 16, h >= 16 else { return true }
+        let sampleSize = 16
+        var pixels = [UInt8](repeating: 0, count: sampleSize * sampleSize * 4)
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: &pixels,
+            width: sampleSize,
+            height: sampleSize,
+            bitsPerComponent: 8,
+            bytesPerRow: sampleSize * 4,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return false
+        }
+        ctx.interpolationQuality = .low
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: sampleSize, height: sampleSize))
+        var nonBlackCount = 0
+        for i in stride(from: 0, to: pixels.count, by: 4) {
+            let r = pixels[i]
+            let g = pixels[i + 1]
+            let b = pixels[i + 2]
+            let a = pixels[i + 3]
+            if a > 10 && (r > 8 || g > 8 || b > 8) {
+                nonBlackCount += 1
+                if nonBlackCount >= 3 {
+                    return false
+                }
+            }
+        }
+        return true
     }
 
     private func cropImage(

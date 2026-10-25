@@ -154,12 +154,17 @@ public final class AXScanner: @unchecked Sendable {
 
         let targetWinID = preferredWindowID ?? SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: pid)
 
-        if let desiredWid = targetWinID,
-           let matchedWin = allWindows.first(where: { cgWindowID(for: $0) == desiredWid }) {
-            resolvedWindowID = desiredWid
-            windowTitle = copyStringAttribute(matchedWin, kAXTitleAttribute as String)
-            primaryWindowFrame = copyFrame(matchedWin)
-            roots.append(matchedWin)
+        if let desiredWid = targetWinID {
+            if let matchedWin = allWindows.first(where: { cgWindowID(for: $0) == desiredWid }) {
+                resolvedWindowID = desiredWid
+                windowTitle = copyStringAttribute(matchedWin, kAXTitleAttribute as String)
+                primaryWindowFrame = copyFrame(matchedWin)
+                roots.append(matchedWin)
+            } else {
+                // Target window ID was explicitly specified (or pinned), e.g., WeChat's content window #499
+                resolvedWindowID = desiredWid
+                roots.append(contentsOf: visibleWindows.isEmpty ? allWindows : visibleWindows)
+            }
         } else if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String),
            (copyAttribute(focusedWindow, kAXMinimizedAttribute as String) as Bool? ?? false) == false {
             resolvedWindowID = cgWindowID(for: focusedWindow)
