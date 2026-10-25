@@ -101,8 +101,9 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }
 
-        // 2. Otherwise find the topmost normal (layer 0) window containing `point`
-        for dict in infoList {
+        // 2. Otherwise find the topmost ON-SCREEN normal (layer 0) window containing `point`
+        let onScreenList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? infoList
+        for dict in onScreenList {
             guard let ownerPid = dict[kCGWindowOwnerPID as String] as? Int32,
                   ownerPid != selfPid,
                   let layer = dict[kCGWindowLayer as String] as? Int,
@@ -353,7 +354,7 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         // the mouseUp event at `cgPt`, and then immediately restore the user's physical cursor.
         // When the target app is in the background, we NEVER use `.cghidEventTap` so we never steal OS focus!
         let isFrontmostApp = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
-        if isFrontmostApp && isPointUnoccludedOnScreen(at: point, forPid: pid) {
+        if (isFrontmostApp || windowUsesFlippedCoordinates(forPid: pid)) && isPointUnoccludedOnScreen(at: point, forPid: pid) {
             let cgPt = point.cgPoint
             CGWarpMouseCursorPosition(cgPt)
             CGAssociateMouseAndMouseCursorPosition(1)
