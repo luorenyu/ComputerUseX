@@ -71,6 +71,29 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
         }
     }
 
+    public func resetAndPromptScreenRecording() {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        proc.arguments = ["reset", "ScreenCapture", "org.opencomputeruse.app"]
+        try? proc.run()
+        proc.waitUntilExit()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            _ = PermissionManager.shared.isScreenRecordingGranted(prompt: true)
+            PermissionManager.shared.openScreenRecordingSettings()
+            self.refreshPermissions()
+        }
+    }
+
+    public func relaunchApp() {
+        let bundlePath = Bundle.main.bundleURL.path
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        proc.arguments = ["-c", "sleep 0.4 && open -g \"\(bundlePath)\""]
+        try? proc.run()
+        NSApplication.shared.terminate(nil)
+    }
+
     public func runVisualHUDDemo() {
         DispatchQueue.global(qos: .userInitiated).async {
             _ = OCUCommandExecutor.shared.execute(IPCRequest(command: "hud_demo"), isDaemonContext: true)
@@ -158,11 +181,23 @@ struct OpenComputerUseMenuBarApp: App {
                         .font(.system(size: 12))
                     Spacer()
                     if !coordinator.screenRecordingGranted {
+                        Button("重置重授") {
+                            coordinator.resetAndPromptScreenRecording()
+                        }
+                        .font(.caption)
+                        .help("清除旧签名录屏权限记录并重新弹窗授权")
+
                         Button("去授权") {
                             _ = PermissionManager.shared.isScreenRecordingGranted(prompt: true)
                             PermissionManager.shared.openScreenRecordingSettings()
                         }
                         .font(.caption)
+
+                        Button("重启生效") {
+                            coordinator.relaunchApp()
+                        }
+                        .font(.caption)
+                        .help("macOS 录屏权限开启后需重启进程刷新状态")
                     }
                 }
 

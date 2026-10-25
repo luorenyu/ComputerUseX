@@ -22,14 +22,16 @@ cp "${ROOT_DIR}/.build/release/ocu" "${DIST_DIR}/ocu"
 
 chmod +x "${MACOS_DIR}/OpenComputerUseApp" "${DIST_DIR}/ocu"
 
-# Prefer a stable Apple Development certificate if available so rebuilds keep macOS TCC permissions;
+# Prefer a deterministic Apple Development certificate (sorted by name) so rebuilds keep macOS TCC permissions;
 # otherwise fall back to ad-hoc signature.
-DEV_IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null | awk -F'"' '/Apple Development/ {print $2; exit}' || true)"
+DEV_IDENTITY_LINE="$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development:" | sort -k3 | head -n 1 || true)"
+DEV_HASH="$(echo "${DEV_IDENTITY_LINE}" | awk '{print $2}' || true)"
+DEV_NAME="$(echo "${DEV_IDENTITY_LINE}" | awk -F'"' '{print $2}' || true)"
 
-if [[ -n "${DEV_IDENTITY}" ]]; then
-    echo "🔏 Signing bundle with stable developer identity: ${DEV_IDENTITY}"
-    codesign --force --sign "${DEV_IDENTITY}" --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
-    codesign --force --sign "${DEV_IDENTITY}" "${DIST_DIR}/ocu"
+if [[ -n "${DEV_HASH}" ]]; then
+    echo "🔏 Signing bundle with stable developer identity: ${DEV_NAME} (${DEV_HASH})"
+    codesign --force --sign "${DEV_HASH}" --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
+    codesign --force --sign "${DEV_HASH}" "${DIST_DIR}/ocu"
 else
     echo "🔏 Signing bundle with ad-hoc signature..."
     codesign --force --sign - --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
