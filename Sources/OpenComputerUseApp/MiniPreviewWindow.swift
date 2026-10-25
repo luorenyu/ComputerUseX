@@ -23,7 +23,9 @@ public final class MiniPreviewViewModel: ObservableObject, @unchecked Sendable {
     @Published public var targetWindowID: UInt32 = 0
     @Published public var appName: String = "App"
     @Published public var windowTitle: String = ""
-    @Published public var windowBounds: ScreenRect = ScreenRect(x: 0, y: 0, width: 1280, height: 800)
+    @Published public var windowBounds: ScreenRect = ScreenRect(x: 0, y: 0, width: 800, height: 760)
+    @Published public var panelWidth: Double = 280.0
+    @Published public var panelHeight: Double = 266.0
     @Published public var previewImage: NSImage? = nil
 
     // Scaled cursor state in normalized window coordinates [0, 1]
@@ -59,18 +61,55 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
     private let captureQueue = DispatchQueue(label: "org.opencomputeruse.pip.capture", qos: .userInteractive)
     private var isCapturingFrame = false
 
-    private let panelWidth: Double = 344.0
-    private let panelHeight: Double = 242.0
+    private let maxPanelEdge: Double = 300.0
+    private let minPanelEdge: Double = 150.0
 
     private init() {}
+
+    /// Computes exact 1:1 aspect-ratio matched dimensions for the floating single-window preview.
+    private func computePanelSize(for bounds: ScreenRect) -> NSSize {
+        let w = max(80.0, bounds.width)
+        let h = max(80.0, bounds.height)
+        let aspect = max(0.38, min(2.6, w / h))
+        let targetW: Double
+        let targetH: Double
+        if aspect >= 1.0 {
+            targetW = maxPanelEdge
+            targetH = max(minPanelEdge, (maxPanelEdge / aspect).rounded())
+        } else {
+            targetH = maxPanelEdge
+            targetW = max(minPanelEdge, (maxPanelEdge * aspect).rounded())
+        }
+        return NSSize(width: targetW, height: targetH)
+    }
+
+    private func updatePanelAspectSize(for bounds: ScreenRect) {
+        let newSize = computePanelSize(for: bounds)
+        let sizeChanged = abs(viewModel.panelWidth - newSize.width) > 1.5 || abs(viewModel.panelHeight - newSize.height) > 1.5
+        viewModel.panelWidth = newSize.width
+        viewModel.panelHeight = newSize.height
+        guard sizeChanged, let panel = self.panel else { return }
+        let oldFrame = panel.frame
+        // Anchor to bottom-right so resizing stays neatly tucked in the corner
+        let newOriginX = oldFrame.maxX - newSize.width
+        let newOriginY = oldFrame.minY
+        panel.setFrame(
+            NSRect(x: newOriginX, y: newOriginY, width: newSize.width, height: newSize.height),
+            display: true,
+            animate: false
+        )
+    }
 
     public func ensureWindowCreated() {
         DispatchQueue.main.async {
             if self.panel != nil { return }
             let screenFrame = NSScreen.screens.first?.visibleFrame ?? NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
-            let originX = screenFrame.maxX - self.panelWidth - 18.0
+            let initialSize = self.computePanelSize(for: self.viewModel.windowBounds)
+            self.viewModel.panelWidth = initialSize.width
+            self.viewModel.panelHeight = initialSize.height
+            let originX = screenFrame.maxX - initialSize.width - 18.0
             let originY = screenFrame.minY + 18.0
-            let rect = NSRect(x: originX, y: originY, width: self.panelWidth, height: self.panelHeight)
+            let rect = NSRect(x: originX, y: originY, width: initialSize.width, height: initialSize.height)
 
             let win = MiniPreviewPanel(
                 contentRect: rect,
@@ -124,6 +163,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
             if windowBounds.width >= 80 && windowBounds.height >= 80 {
                 self.viewModel.windowBounds = windowBounds
+                self.updatePanelAspectSize(for: windowBounds)
             }
             let isFront = SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: windowID, pid: pid)
             self.viewModel.isBackgroundMode = !isFront
@@ -342,6 +382,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                 self.viewModel.previewImage = nsImage
                 if captured.bounds.width >= 80 && captured.bounds.height >= 80 {
                     self.viewModel.windowBounds = captured.bounds
+                    self.updatePanelAspectSize(for: captured.bounds)
                 }
                 if self.viewModel.isBackgroundMode != !isFront {
                     self.viewModel.isBackgroundMode = !isFront
@@ -361,223 +402,163 @@ struct MiniPreviewRootView: View {
     @ObservedObject var viewModel: MiniPreviewViewModel
     let onSummonWindow: () -> Void
     let onClosePreview: () -> Void
+    @State private var isHovering: Bool = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            // 1. Top Header Bar
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(viewModel.isBackgroundMode ? Color.cyan : Color.green)
-                    .frame(width: 7, height: 7)
-                    .shadow(color: viewModel.isBackgroundMode ? .cyan : .green, radius: 3)
+        GeometryReader { geo in
+            let w = max(1.0, geo.size.width)
+            let h = max(1.0, geo.size.height)
 
-                Text("\(viewModel.appName) #\(viewModel.targetWindowID)")
-                    .font(.system(size: 11, weight: .bold, design: .rounded))
-                    .foregroundColor(.white)
-                    .lineLimit(1)
-
-                Text(viewModel.isBackgroundMode ? "后台静默协作" : "前台同步")
-                    .font(.system(size: 9.5, weight: .semibold, design: .rounded))
-                    .foregroundColor(viewModel.isBackgroundMode ? Color.cyan : Color.green)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1.5)
-                    .background(
-                        Capsule()
-                            .fill((viewModel.isBackgroundMode ? Color.cyan : Color.green).opacity(0.18))
-                    )
-
-                Spacer()
-
-                Button(action: onSummonWindow) {
-                    HStack(spacing: 3) {
-                        Image(systemName: "macwindow.on.rectangle")
-                            .font(.system(size: 9.5, weight: .bold))
-                        Text("唤起")
-                            .font(.system(size: 10, weight: .bold))
+            ZStack(alignment: .topLeading) {
+                // 1. Edge-to-Edge 1:1 Single Application Window Surface (Zero desktop background / zero black bars)
+                if let img = viewModel.previewImage {
+                    Image(nsImage: img)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(width: w, height: h)
+                } else {
+                    Color(red: 0.08, green: 0.09, blue: 0.12)
+                    VStack(spacing: 6) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                        Text(viewModel.appName)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
                     }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule()
-                            .fill(Color.blue.opacity(0.85))
-                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                .buttonStyle(.plain)
-                .help("点击将正在后台操作的真实窗口唤起到最前面")
 
-                Button(action: onClosePreview) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 9.5, weight: .bold))
-                        .foregroundColor(.white.opacity(0.75))
-                        .frame(width: 18, height: 18)
-                        .background(Circle().fill(Color.white.opacity(0.12)))
+                // 2. Scaled Element Highlight inside Single Window
+                if let normRect = viewModel.highlightNormRect {
+                    let hx = normRect.origin.x * w
+                    let hy = normRect.origin.y * h
+                    let hw = max(10.0, normRect.size.width * w)
+                    let hh = max(8.0, normRect.size.height * h)
+
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.cyan, lineWidth: 1.8)
+                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.cyan.opacity(0.14)))
+                        .frame(width: hw, height: hh)
+                        .position(x: hx + hw / 2.0, y: hy + hh / 2.0)
                 }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .background(Color.black.opacity(0.65))
 
-            // 2. Live Window Stream Canvas + Scaled Virtual Cursor & Ripples
-            GeometryReader { geo in
-                let canvasSize = geo.size
-                let fitted = aspectFitRect(
-                    sourceSize: CGSize(
-                        width: max(1, viewModel.windowBounds.width),
-                        height: max(1, viewModel.windowBounds.height)
-                    ),
-                    in: canvasSize
-                )
+                // 3. Scaled Click Ripples inside Single Window
+                ForEach(viewModel.ripples) { ripple in
+                    let rx = ripple.normX * w
+                    let ry = ripple.normY * h
+                    MiniPreviewRippleView()
+                        .position(x: rx, y: ry)
+                }
 
-                ZStack(alignment: .topLeading) {
-                    Color(red: 0.06, green: 0.07, blue: 0.10)
+                // 4. Scaled Futuristic Tailless Virtual Cursor inside Single Window
+                if viewModel.showCursor {
+                    let cx = viewModel.cursorNormX * w
+                    let cy = viewModel.cursorNormY * h
 
-                    if let img = viewModel.previewImage {
-                        Image(nsImage: img)
-                            .resizable()
-                            .interpolation(.high)
-                            .frame(width: fitted.width, height: fitted.height)
-                            .cornerRadius(5)
-                            .position(x: fitted.midX, y: fitted.midY)
-                    } else {
-                        VStack(spacing: 6) {
-                            ProgressView()
-                                .scaleEffect(0.7)
-                            Text("正在连接窗口画面...")
-                                .font(.system(size: 10.5))
-                                .foregroundColor(.white.opacity(0.65))
+                    ZStack(alignment: .topLeading) {
+                        if viewModel.cursorPressed {
+                            Circle()
+                                .stroke(Color.cyan, lineWidth: 2)
+                                .background(Circle().fill(Color.cyan.opacity(0.28)))
+                                .frame(width: 20, height: 20)
+                                .offset(x: -10, y: -10)
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-
-                    // Scaled Element Highlight inside Mini Preview
-                    if let normRect = viewModel.highlightNormRect {
-                        let hx = fitted.minX + normRect.origin.x * fitted.width
-                        let hy = fitted.minY + normRect.origin.y * fitted.height
-                        let hw = max(10.0, normRect.size.width * fitted.width)
-                        let hh = max(8.0, normRect.size.height * fitted.height)
-
-                        RoundedRectangle(cornerRadius: 3)
-                            .stroke(Color.cyan, lineWidth: 1.8)
-                            .background(RoundedRectangle(cornerRadius: 3).fill(Color.cyan.opacity(0.16)))
-                            .frame(width: hw, height: hh)
-                            .position(x: hx + hw / 2.0, y: hy + hh / 2.0)
-                    }
-
-                    // Scaled Click Ripples inside Mini Preview
-                    ForEach(viewModel.ripples) { ripple in
-                        let rx = fitted.minX + ripple.normX * fitted.width
-                        let ry = fitted.minY + ripple.normY * fitted.height
-                        MiniPreviewRippleView()
-                            .position(x: rx, y: ry)
-                    }
-
-                    // Scaled Futuristic Tailless Virtual Cursor inside Mini Preview
-                    if viewModel.showCursor {
-                        let cx = fitted.minX + viewModel.cursorNormX * fitted.width
-                        let cy = fitted.minY + viewModel.cursorNormY * fitted.height
 
                         ZStack(alignment: .topLeading) {
-                            if viewModel.cursorPressed {
-                                Circle()
-                                    .stroke(Color.cyan, lineWidth: 2)
-                                    .background(Circle().fill(Color.cyan.opacity(0.28)))
-                                    .frame(width: 20, height: 20)
-                                    .offset(x: -10, y: -10)
-                            }
-
-                            ZStack(alignment: .topLeading) {
-                                VirtualCursorArrowShape()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color(red: 0.00, green: 0.96, blue: 1.00),
-                                                Color(red: 0.14, green: 0.56, blue: 1.00),
-                                                Color(red: 0.42, green: 0.24, blue: 0.98)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
+                            VirtualCursorArrowShape()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.00, green: 0.96, blue: 1.00),
+                                            Color(red: 0.14, green: 0.56, blue: 1.00),
+                                            Color(red: 0.42, green: 0.24, blue: 0.98)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
                                     )
+                                )
 
-                                VirtualCursorCoreFacetShape()
-                                    .fill(
-                                        LinearGradient(
-                                            colors: [
-                                                Color.white.opacity(0.90),
-                                                Color(red: 0.45, green: 0.95, blue: 1.00).opacity(0.65)
-                                            ],
-                                            startPoint: .topLeading,
-                                            endPoint: .bottomTrailing
-                                        )
+                            VirtualCursorCoreFacetShape()
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white.opacity(0.90),
+                                            Color(red: 0.45, green: 0.95, blue: 1.00).opacity(0.65)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
                                     )
+                                )
 
-                                VirtualCursorArrowShape()
-                                    .stroke(Color.white, style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
-                            }
-                            .frame(width: 15, height: 19)
-                            .scaleEffect(viewModel.cursorPressed ? 0.80 : 0.92, anchor: .topLeading)
-                            .rotationEffect(.degrees(viewModel.cursorTiltDegrees), anchor: .topLeading)
-                            .shadow(color: Color.cyan.opacity(0.85), radius: 4, x: 0, y: 1)
+                            VirtualCursorArrowShape()
+                                .stroke(Color.white, style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
                         }
-                        .position(x: cx, y: cy)
+                        .frame(width: 15, height: 19)
+                        .scaleEffect(viewModel.cursorPressed ? 0.80 : 0.92, anchor: .topLeading)
+                        .rotationEffect(.degrees(viewModel.cursorTiltDegrees), anchor: .topLeading)
+                        .shadow(color: Color.cyan.opacity(0.85), radius: 4, x: 0, y: 1)
                     }
+                    .position(x: cx, y: cy)
                 }
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    onSummonWindow()
-                }
-            }
-            .frame(height: 174)
 
-            // 3. Bottom Action Status Footer
-            HStack(spacing: 6) {
-                Image(systemName: "cursorarrow.click.2")
-                    .font(.system(size: 10))
-                    .foregroundColor(.cyan)
-                Text(viewModel.statusText)
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.88))
-                    .lineLimit(1)
-                Spacer()
-                Text("点击小窗唤起真实界面")
-                    .font(.system(size: 9.5))
-                    .foregroundColor(.white.opacity(0.55))
+                // 5. Minimalist Hover Control Overlay (Only appears when user hovers over the mini window)
+                if isHovering {
+                    HStack(spacing: 6) {
+                        Spacer()
+                        Button(action: onSummonWindow) {
+                            HStack(spacing: 3) {
+                                Image(systemName: "macwindow.on.rectangle")
+                                    .font(.system(size: 9.5, weight: .bold))
+                                Text("唤起 \(viewModel.appName)")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Capsule().fill(Color.black.opacity(0.72)))
+                        }
+                        .buttonStyle(.plain)
+
+                        Button(action: onClosePreview) {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 9.5, weight: .bold))
+                                .foregroundColor(.white.opacity(0.88))
+                                .frame(width: 20, height: 20)
+                                .background(Circle().fill(Color.black.opacity(0.72)))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(8)
+                    .transition(.opacity)
+                }
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(Color.black.opacity(0.75))
+            .contentShape(Rectangle())
+            .onTapGesture {
+                onSummonWindow()
+            }
+            .onHover { hovering in
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    isHovering = hovering
+                }
+            }
         }
-        .frame(width: 344, height: 242)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .frame(width: viewModel.panelWidth, height: viewModel.panelHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(
                     LinearGradient(
                         colors: [
-                            Color.cyan.opacity(viewModel.isBackgroundMode ? 0.75 : 0.4),
-                            Color.blue.opacity(0.35)
+                            Color.cyan.opacity(0.65),
+                            Color.white.opacity(0.25)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     ),
-                    lineWidth: 1.4
+                    lineWidth: 1.2
                 )
         )
-        .shadow(color: Color.black.opacity(0.45), radius: 14, x: 0, y: 6)
-    }
-
-    private func aspectFitRect(sourceSize: CGSize, in containerSize: CGSize) -> CGRect {
-        let pad: CGFloat = 6.0
-        let availW = max(10.0, containerSize.width - pad * 2)
-        let availH = max(10.0, containerSize.height - pad * 2)
-        let scale = min(availW / max(1.0, sourceSize.width), availH / max(1.0, sourceSize.height))
-        let w = sourceSize.width * scale
-        let h = sourceSize.height * scale
-        let x = (containerSize.width - w) / 2.0
-        let y = (containerSize.height - h) / 2.0
-        return CGRect(x: x, y: y, width: w, height: h)
+        .shadow(color: Color.black.opacity(0.42), radius: 14, x: 0, y: 6)
     }
 }
 

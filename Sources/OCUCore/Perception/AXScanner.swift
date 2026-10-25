@@ -117,6 +117,12 @@ public final class AXScanner: @unchecked Sendable {
                 (app.localizedName?.lowercased().contains(lower) == true) ||
                 (app.bundleIdentifier?.lowercased().contains(lower) == true)
             })
+        } else if let prefWid = preferredWindowID, prefWid > 0,
+                  let infoList = CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]],
+                  let winInfo = infoList.first(where: { ($0[kCGWindowNumber as String] as? UInt32) == prefWid }),
+                  let winPid = winInfo[kCGWindowOwnerPID as String] as? Int32,
+                  let ownerApp = NSRunningApplication(processIdentifier: winPid) {
+            targetApp = ownerApp
         } else {
             targetApp = workspace.frontmostApplication
         }

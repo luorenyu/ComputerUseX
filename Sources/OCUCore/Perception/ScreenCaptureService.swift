@@ -104,6 +104,7 @@ public final class ScreenCaptureService: @unchecked Sendable {
             config.width = targetW
             config.height = targetH
             config.showsCursor = false
+            config.ignoreShadowsSingleWindow = true
 
             if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
                 result = (img, winRect)
@@ -133,28 +134,32 @@ public final class ScreenCaptureService: @unchecked Sendable {
             do {
                 let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
 
-                // Fast path: capture only the target application's window when windowOnly is enabled
-                if windowOnly, let targetPid = pid, targetPid > 0 {
-                    let appWindows = content.windows.filter { win in
-                        win.owningApplication?.processID == targetPid &&
-                        win.windowLayer == 0 &&
-                        win.frame.width >= 120 &&
-                        win.frame.height >= 120
+                // Fast path: capture ONLY the target application's independent window when windowOnly is enabled
+                if windowOnly {
+                    let desiredWid = preferredWindowID ?? (pid.flatMap { SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: $0) })
+                    var matchedWindow: SCWindow? = nil
+
+                    if let wid = desiredWid, wid > 0 {
+                        matchedWindow = content.windows.first(where: { $0.windowID == wid })
                     }
-                    let desiredWid = preferredWindowID ?? SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: targetPid)
-                    let onScreenPool = appWindows.filter(\.isOnScreen)
-                    let candidatePool = onScreenPool.isEmpty ? appWindows : onScreenPool
-                    let matchedWindow: SCWindow? = {
-                        if let wid = desiredWid, let exact = appWindows.first(where: { $0.windowID == wid }) {
-                            return exact
+
+                    if matchedWindow == nil, let targetPid = pid, targetPid > 0 {
+                        let appWindows = content.windows.filter { win in
+                            win.owningApplication?.processID == targetPid &&
+                            win.windowLayer == 0 &&
+                            win.frame.width >= 80 &&
+                            win.frame.height >= 80
                         }
+                        let onScreenPool = appWindows.filter(\.isOnScreen)
+                        let candidatePool = onScreenPool.isEmpty ? appWindows : onScreenPool
                         if let tr = targetRect {
-                            return candidatePool.max(by: { a, b in
+                            matchedWindow = candidatePool.max(by: { a, b in
                                 ScreenRect(a.frame).intersectionArea(with: tr) < ScreenRect(b.frame).intersectionArea(with: tr)
                             })
+                        } else {
+                            matchedWindow = candidatePool.max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
                         }
-                        return candidatePool.max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
-                    }()
+                    }
 
                     if let scWin = matchedWindow {
                         let winRect = ScreenRect(scWin.frame)
@@ -165,6 +170,7 @@ public final class ScreenCaptureService: @unchecked Sendable {
                         winConfig.width = pw
                         winConfig.height = ph
                         winConfig.showsCursor = false
+                        winConfig.ignoreShadowsSingleWindow = true
                         if let winImg = try? await SCScreenshotManager.captureImage(
                             contentFilter: winFilter,
                             configuration: winConfig
