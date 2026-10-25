@@ -127,8 +127,12 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
             let isFront = SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: windowID, pid: pid)
             self.viewModel.isBackgroundMode = !isFront
-            self.showPreviewWindow()
-            self.triggerImmediateCapture()
+            if isFront {
+                self.hidePreview()
+            } else {
+                self.showPreviewWindow()
+                self.triggerImmediateCapture()
+            }
         }
     }
 
@@ -169,8 +173,12 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                 pid: self.viewModel.targetPid
             )
             self.viewModel.isBackgroundMode = !isFront
-            self.showPreviewWindow()
-            self.triggerImmediateCapture()
+            if isFront {
+                self.hidePreview()
+            } else {
+                self.showPreviewWindow()
+                self.triggerImmediateCapture()
+            }
         }
     }
 
@@ -261,7 +269,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                 tiltAngle: 0.0,
                 label: badge
             )
-            self.triggerImmediateCapture()
+            self.hidePreview()
         }
     }
 
@@ -299,7 +307,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
         }
         autoHideWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 14.0, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5, execute: item)
     }
 
     private func triggerImmediateCapture() {
@@ -340,6 +348,8 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                     if !isFront {
                         // Target window went to background -> hide desktop cursor and keep cursor in Mini PiP!
                         VirtualCursorWindowController.shared.hideCursor()
+                    } else {
+                        self.hidePreview()
                     }
                 }
             }
@@ -463,7 +473,7 @@ struct MiniPreviewRootView: View {
                             .position(x: rx, y: ry)
                     }
 
-                    // Scaled Virtual Cursor + Badge inside Mini Preview
+                    // Scaled Futuristic Tailless Virtual Cursor inside Mini Preview
                     if viewModel.showCursor {
                         let cx = fitted.minX + viewModel.cursorNormX * fitted.width
                         let cy = fitted.minY + viewModel.cursorNormY * fitted.height
@@ -477,37 +487,39 @@ struct MiniPreviewRootView: View {
                                     .offset(x: -10, y: -10)
                             }
 
-                            VirtualCursorArrowShape()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.05, green: 0.85, blue: 1.0),
-                                            Color(red: 0.20, green: 0.48, blue: 0.98)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                            ZStack(alignment: .topLeading) {
+                                VirtualCursorArrowShape()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color(red: 0.00, green: 0.96, blue: 1.00),
+                                                Color(red: 0.14, green: 0.56, blue: 1.00),
+                                                Color(red: 0.42, green: 0.24, blue: 0.98)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                                .overlay(
-                                    VirtualCursorArrowShape()
-                                        .stroke(Color.white, style: StrokeStyle(lineWidth: 1.4, lineJoin: .round))
-                                )
-                                .frame(width: 14, height: 20)
-                                .scaleEffect(viewModel.cursorPressed ? 0.84 : 0.76, anchor: .topLeading)
-                                .rotationEffect(.degrees(viewModel.cursorTiltDegrees), anchor: .topLeading)
-                                .shadow(color: Color.cyan.opacity(0.8), radius: 4, x: 0, y: 1)
 
-                            Text(viewModel.cursorBadge)
-                                .font(.system(size: 8.5, weight: .bold, design: .rounded))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 4.5)
-                                .padding(.vertical, 1.5)
-                                .background(
-                                    Capsule()
-                                        .fill(Color.black.opacity(0.85))
-                                        .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.8), lineWidth: 0.8))
-                                )
-                                .offset(x: 11, y: 13)
+                                VirtualCursorCoreFacetShape()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [
+                                                Color.white.opacity(0.90),
+                                                Color(red: 0.45, green: 0.95, blue: 1.00).opacity(0.65)
+                                            ],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
+                                    )
+
+                                VirtualCursorArrowShape()
+                                    .stroke(Color.white, style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
+                            }
+                            .frame(width: 15, height: 19)
+                            .scaleEffect(viewModel.cursorPressed ? 0.80 : 0.92, anchor: .topLeading)
+                            .rotationEffect(.degrees(viewModel.cursorTiltDegrees), anchor: .topLeading)
+                            .shadow(color: Color.cyan.opacity(0.85), radius: 4, x: 0, y: 1)
                         }
                         .position(x: cx, y: cy)
                     }

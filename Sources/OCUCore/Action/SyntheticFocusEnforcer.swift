@@ -349,12 +349,12 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }()
 
-        // 1. If the target app is already the frontmost application and the point is unoccluded on screen,
-        // perform an atomic micro-warp + HID event tap click, wait 35ms for WindowServer/Chromium to process
-        // the mouseUp event at `cgPt`, and then immediately restore the user's physical cursor.
-        // When the target app is in the background, we NEVER use `.cghidEventTap` so we never steal OS focus!
+        // 1. Only when the target app is ALREADY the frontmost active application and the point is unoccluded on screen,
+        // perform an atomic micro-warp + HID event tap click.
+        // When the target app is in the background, we NEVER post to `.cghidEventTap` so we never pull a background
+        // window to the foreground or steal OS focus from the user's active app!
         let isFrontmostApp = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
-        if (isFrontmostApp || windowUsesFlippedCoordinates(forPid: pid)) && isPointUnoccludedOnScreen(at: point, forPid: pid) {
+        if isFrontmostApp && isPointUnoccludedOnScreen(at: point, forPid: pid) {
             let cgPt = point.cgPoint
             CGWarpMouseCursorPosition(cgPt)
             CGAssociateMouseAndMouseCursorPosition(1)
@@ -435,6 +435,44 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 windowBounds: windowBounds
             )
         }
+    }
+
+    /// Posts a window-targeted scroll wheel event directly to `pid` (matching Codex `SynthesizedEvent.scroll`)
+    /// when the target window is in the background, avoiding focus stealing or scrolling the wrong foreground window.
+    public func postSynthesizedScrollEvent(
+        at point: ScreenPoint,
+        dx: Int32,
+        dy: Int32,
+        pid: Int32,
+        windowID: UInt32,
+        windowBounds: ScreenRect
+    ) {
+        guard let scrollEvent = CGEvent(
+            scrollWheelEvent2Source: nil,
+            units: .pixel,
+            wheelCount: 2,
+            wheel1: dy,
+            wheel2: dx,
+            wheel3: 0
+        ) else {
+            return
+        }
+        scrollEvent.location = point.cgPoint
+        if windowID != 0 {
+            if let field91 = CGEventField(rawValue: 91) {
+                scrollEvent.setIntegerValueField(field91, value: Int64(windowID))
+            }
+            if let field92 = CGEventField(rawValue: 92) {
+                scrollEvent.setIntegerValueField(field92, value: Int64(windowID))
+            }
+        }
+        let localX = point.x - windowBounds.x
+        let localYTopDown = point.y - windowBounds.y
+        let localYBottomUp = max(0.0, windowBounds.height - localYTopDown)
+        let usesFlipped = windowUsesFlippedCoordinates(forPid: pid)
+        let winLocalPt = CGPoint(x: localX, y: usesFlipped ? localYTopDown : localYBottomUp)
+        setWindowLocationFn?(scrollEvent, winLocalPt)
+        scrollEvent.postToPid(pid)
     }
 
     /// Posts a key press (`keyCode` + modifier `flags`) directly to `pid`.

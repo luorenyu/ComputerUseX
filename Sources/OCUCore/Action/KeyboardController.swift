@@ -139,46 +139,49 @@ public final class KeyboardController: @unchecked Sendable {
                 !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: $0.windowID, pid: $0.pid)
             } ?? false
 
-            if isBackground && AXScanner.shared.performNativeSetValue(ref: el.ref, value: text, submit: submit) {
-                KillSwitchMonitor.shared.emitHUDEvent(
-                    .highlightElement(rect: el.frame, label: "\(el.ref) \(el.label)")
-                )
+            if isBackground, AXScanner.shared.resolveLiveAXElement(for: el.ref) != nil {
                 try MouseController.shared.moveSmoothly(
                     to: el.centerPoint,
-                    duration: 0.14,
+                    duration: 0.16,
                     virtualCursor: true,
                     windowID: winCtx?.windowID,
                     pid: el.pid,
-                    label: el.ref
+                    label: nil
                 )
-                KillSwitchMonitor.shared.emitHUDEvent(
-                    .clickRipple(point: el.centerPoint, button: .left, clickCount: 1)
-                )
-                let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
-                KillSwitchMonitor.shared.emitHUDEvent(
-                    .statusPill(title: "⌨️ [后台输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
-                )
-                if submit {
-                    if let wc = winCtx {
-                        SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
-                            pid: wc.pid,
-                            windowID: wc.windowID,
-                            windowBounds: wc.bounds,
-                            activationPoint: el.centerPoint
-                        )
+                Thread.sleep(forTimeInterval: 0.06)
+                if AXScanner.shared.performNativeSetValue(ref: el.ref, value: text, submit: submit) {
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .highlightElement(rect: el.frame, label: el.label)
+                    )
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .clickRipple(point: el.centerPoint, button: .left, clickCount: 1)
+                    )
+                    let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .statusPill(title: "⌨️ [后台输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
+                    )
+                    if submit {
+                        if let wc = winCtx {
+                            SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
+                                pid: wc.pid,
+                                windowID: wc.windowID,
+                                windowBounds: wc.bounds,
+                                activationPoint: el.centerPoint
+                            )
+                        }
+                        Thread.sleep(forTimeInterval: 0.04)
+                        postKeyCode(36, flags: [], targetPid: el.pid)
                     }
-                    Thread.sleep(forTimeInterval: 0.04)
-                    postKeyCode(36, flags: [], targetPid: el.pid)
+                    let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+                    KillSwitchMonitor.shared.logAction("⌨️ [AXValue] Typed \"\(preview)\" -> \(el.ref)")
+                    return ActionOutcome(
+                        action: "type(ax-native)",
+                        targetDescription: "\(el.ref) [\(el.role): \(el.label)]",
+                        point: el.centerPoint,
+                        details: "length=\(text.count), submit=\(submit), mode=ax-value-background",
+                        elapsedMs: ms
+                    )
                 }
-                let ms = Int(Date().timeIntervalSince(startTime) * 1000)
-                KillSwitchMonitor.shared.logAction("⌨️ [AXValue] Typed \"\(preview)\" -> \(el.ref)")
-                return ActionOutcome(
-                    action: "type(ax-native)",
-                    targetDescription: "\(el.ref) [\(el.role): \(el.label)]",
-                    point: el.centerPoint,
-                    details: "length=\(text.count), submit=\(submit), mode=ax-value-background",
-                    elapsedMs: ms
-                )
             }
         }
 

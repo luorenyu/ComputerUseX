@@ -78,20 +78,8 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
                 self.scheduleAutoFade()
 
-            case .pointerTrail(let points):
-                if self.isTargetInBackground {
-                    self.trailPoints = []
-                    return
-                }
-                self.trailPoints = points
-                self.trailClearItem?.cancel()
-                let item = DispatchWorkItem { [weak self] in
-                    withAnimation(.easeOut(duration: 0.3)) {
-                        self?.trailPoints = []
-                    }
-                }
-                self.trailClearItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
+            case .pointerTrail:
+                self.trailPoints = []
 
             case .highlightElement(let rect, let label):
                 MiniPreviewWindowController.shared.showHighlight(rect: rect, label: label)
@@ -102,7 +90,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
                 withAnimation(.easeOut(duration: 0.15)) {
                     self.highlightRect = rect
-                    self.highlightLabel = label
+                    self.highlightLabel = nil
                 }
                 self.highlightClearItem?.cancel()
                 let item = DispatchWorkItem { [weak self] in
@@ -112,7 +100,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     }
                 }
                 self.highlightClearItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: item)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
 
             case .clickRipple(let point, let button, let clickCount):
                 MiniPreviewWindowController.shared.addClickRipple(at: point)
@@ -277,69 +265,16 @@ struct OverlayHUDRootView: View {
                         .transition(.opacity)
                 }
 
-                // 2. Smooth Bézier Pointer Trail Canvas
-                if viewModel.trailPoints.count >= 2 {
-                    Canvas { context, _ in
-                        var path = Path()
-                        for (idx, pt) in viewModel.trailPoints.enumerated() {
-                            let cgPt = CGPoint(x: pt.x - screenOrigin.x, y: pt.y - screenOrigin.y)
-                            if idx == 0 {
-                                path.move(to: cgPt)
-                            } else {
-                                path.addLine(to: cgPt)
-                            }
-                        }
-                        let firstLocal = CGPoint(
-                            x: (viewModel.trailPoints.first?.x ?? 0) - screenOrigin.x,
-                            y: (viewModel.trailPoints.first?.y ?? 0) - screenOrigin.y
-                        )
-                        let lastLocal = CGPoint(
-                            x: (viewModel.trailPoints.last?.x ?? 0) - screenOrigin.x,
-                            y: (viewModel.trailPoints.last?.y ?? 0) - screenOrigin.y
-                        )
-                        context.stroke(
-                            path,
-                            with: .linearGradient(
-                                Gradient(colors: [Color.cyan.opacity(0.15), Color.cyan.opacity(0.9)]),
-                                startPoint: firstLocal,
-                                endPoint: lastLocal
-                            ),
-                            style: StrokeStyle(lineWidth: 3.5, lineCap: .round, lineJoin: .round)
-                        )
-
-                        if let head = viewModel.trailPoints.last {
-                            let hx = head.x - screenOrigin.x
-                            let hy = head.y - screenOrigin.y
-                            let haloRect = CGRect(x: hx - 12, y: hy - 12, width: 24, height: 24)
-                            context.fill(Path(ellipseIn: haloRect), with: .color(Color.cyan.opacity(0.28)))
-                            context.stroke(Path(ellipseIn: haloRect), with: .color(Color.cyan), lineWidth: 2)
-                        }
-                    }
-                    .ignoresSafeArea()
-                }
-
-                // 3. Target Element Highlight Frame
+                // 2. Target Element Highlight Frame (Clean futuristic frame, no internal @eXX badge)
                 if let rect = viewModel.highlightRect {
-                    ZStack(alignment: .topLeading) {
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.cyan, lineWidth: 2.5)
-                            .background(RoundedRectangle(cornerRadius: 6).fill(Color.cyan.opacity(0.10)))
-                            .frame(width: max(12, rect.width), height: max(12, rect.height))
-
-                        if let label = viewModel.highlightLabel, !label.isEmpty {
-                            Text(label)
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Capsule().fill(Color.blue.opacity(0.92)))
-                                .offset(y: -22)
-                        }
-                    }
-                    .position(
-                        x: (rect.x - screenOrigin.x) + rect.width / 2.0,
-                        y: (rect.y - screenOrigin.y) + rect.height / 2.0
-                    )
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.cyan, lineWidth: 2.0)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.cyan.opacity(0.08)))
+                        .frame(width: max(12, rect.width), height: max(12, rect.height))
+                        .position(
+                            x: (rect.x - screenOrigin.x) + rect.width / 2.0,
+                            y: (rect.y - screenOrigin.y) + rect.height / 2.0
+                        )
                 }
 
                 // 4. Click Ripples

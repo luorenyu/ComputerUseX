@@ -19,15 +19,14 @@ public final class VirtualCursorViewModel: ObservableObject, @unchecked Sendable
     @Published public var isPressed: Bool = false
     @Published public var tiltAngleDegrees: Double = 0.0
     @Published public var stretchScale: Double = 1.0
-    @Published public var badgeText: String = "OCU"
     @Published public var isVisible: Bool = false
 
     public init() {}
 }
 
 /// Manages the persistent, non-intrusive virtual cursor window (`ComputerUseCursor` equivalent).
-/// Never moves the user's physical hardware cursor and orders itself immediately above the target window
-/// (`window.order(.above, relativeTo: Int(targetWindowID))`), following target window movement automatically.
+/// Never moves the user's physical hardware cursor, orders itself immediately above the target window,
+/// follows target window movement automatically, and auto-fades out 2.0s after an action sequence finishes.
 public final class VirtualCursorWindowController: @unchecked Sendable {
     public static let shared = VirtualCursorWindowController()
 
@@ -38,12 +37,13 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
     private var lastTrackedWindowOrigin: ScreenPoint?
     private var currentScreenPoint: ScreenPoint = ScreenPoint(x: 400, y: 300)
     private var windowTrackTimer: Timer?
+    private var autoHideWorkItem: DispatchWorkItem?
 
-    // Tip anchor inside the 136x68 window: (16pt from left, 14pt from top => 54pt from bottom)
-    private let windowWidth: Double = 136.0
-    private let windowHeight: Double = 68.0
-    private let tipOffsetX: Double = 16.0
-    private let tipOffsetYFromBottom: Double = 54.0
+    // Tip anchor inside the compact 64x64 window: (18pt from left, 16pt from top => 48pt from bottom)
+    private let windowWidth: Double = 64.0
+    private let windowHeight: Double = 64.0
+    private let tipOffsetX: Double = 18.0
+    private let tipOffsetYFromBottom: Double = 48.0
 
     private init() {}
 
@@ -95,8 +95,6 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
             let origin = self.appKitWindowOrigin(forTipAt: point)
             win.setFrameOrigin(origin)
 
-            // Order immediately above the target window so it never blocks unrelated foreground windows,
-            // or float if no specific windowID was resolved.
             if let wid = self.trackedWindowID, wid > 0 {
                 win.level = .normal
                 win.order(.above, relativeTo: Int(wid))
@@ -108,14 +106,12 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
                 win.orderFrontRegardless()
             }
 
-            withAnimation(.interactiveSpring(response: 0.14, dampingFraction: 0.72)) {
-                self.viewModel.isVisible = true
-                self.viewModel.tiltAngleDegrees = max(-22.0, min(22.0, tiltAngle))
-                self.viewModel.stretchScale = abs(tiltAngle) > 2.5 ? 1.08 : 1.0
-                if let lbl = label, !lbl.isEmpty {
-                    self.viewModel.badgeText = lbl
-                }
+            self.viewModel.isVisible = true
+            withAnimation(.interactiveSpring(response: 0.08, dampingFraction: 0.82)) {
+                self.viewModel.tiltAngleDegrees = max(-18.0, min(18.0, tiltAngle))
+                self.viewModel.stretchScale = abs(tiltAngle) > 2.5 ? 1.05 : 1.0
             }
+            self.scheduleAutoHide(after: 2.0)
         }
     }
 
@@ -129,19 +125,39 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
                     win.order(.above, relativeTo: Int(wid))
                 }
             }
-            withAnimation(.spring(response: 0.15, dampingFraction: 0.6)) {
+            self.viewModel.isVisible = true
+            withAnimation(.spring(response: 0.12, dampingFraction: 0.65)) {
                 self.viewModel.isPressed = pressed
-                self.viewModel.tiltAngleDegrees = pressed ? -6.0 : 0.0
-                self.viewModel.stretchScale = pressed ? 0.85 : 1.0
+                self.viewModel.tiltAngleDegrees = pressed ? -4.0 : 0.0
+                self.viewModel.stretchScale = pressed ? 0.84 : 1.0
             }
+            self.scheduleAutoHide(after: 2.0)
         }
     }
 
     public func hideCursor() {
         DispatchQueue.main.async {
+            self.autoHideWorkItem?.cancel()
             self.viewModel.isVisible = false
             self.cursorWindow?.orderOut(nil)
         }
+    }
+
+    private func scheduleAutoHide(after seconds: TimeInterval) {
+        autoHideWorkItem?.cancel()
+        let item = DispatchWorkItem { [weak self] in
+            guard let self = self else { return }
+            withAnimation(.easeOut(duration: 0.25)) {
+                self.viewModel.isVisible = false
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.26) {
+                if !self.viewModel.isVisible {
+                    self.cursorWindow?.orderOut(nil)
+                }
+            }
+        }
+        autoHideWorkItem = item
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: item)
     }
 
     private func appKitWindowOrigin(forTipAt point: ScreenPoint) -> NSPoint {
@@ -162,8 +178,6 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
         return ScreenPoint(x: Double(x), y: Double(y))
     }
 
-    /// Equivalent to Codex's `-[ComputerUse.ComputerUseCursor windowDidMove:]`:
-    /// When the user drags the target application window, the virtual cursor glides with it.
     private func syncWithTargetWindowMoveIfNeeded() {
         guard viewModel.isVisible,
               let wid = trackedWindowID, wid > 0,
@@ -188,17 +202,32 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
     }
 }
 
+/// Sleek, tailless futuristic sci-fi cyber-dart pointer shape anchored at (0, 0).
+/// Features a sharp aerodynamic delta-chevron silhouette without the traditional mouse stem/tail.
 struct VirtualCursorArrowShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        // Crisp macOS-style vector pointer arrow anchored at (0, 0)
+        // Apex at (0, 0)
         path.move(to: CGPoint(x: 0, y: 0))
-        path.addLine(to: CGPoint(x: 0, y: 22))
-        path.addLine(to: CGPoint(x: 5.8, y: 17.2))
-        path.addLine(to: CGPoint(x: 9.8, y: 25.5))
-        path.addLine(to: CGPoint(x: 13.2, y: 23.8))
-        path.addLine(to: CGPoint(x: 9.2, y: 15.5))
-        path.addLine(to: CGPoint(x: 16.5, y: 15.5))
+        // Left aerodynamic blade edge
+        path.addLine(to: CGPoint(x: 1.2, y: 21.5))
+        // Inner swept-wing chevron notch (no tail!)
+        path.addLine(to: CGPoint(x: 7.4, y: 14.8))
+        // Right high-speed wingtip
+        path.addLine(to: CGPoint(x: 17.5, y: 12.6))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Inner holographic core facet inside the futuristic cyber-dart pointer.
+struct VirtualCursorCoreFacetShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: 2.2, y: 3.4))
+        path.addLine(to: CGPoint(x: 2.9, y: 14.2))
+        path.addLine(to: CGPoint(x: 6.8, y: 10.6))
+        path.addLine(to: CGPoint(x: 11.4, y: 9.6))
         path.closeSubpath()
         return path
     }
@@ -210,24 +239,49 @@ struct VirtualCursorRootView: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             if viewModel.isVisible {
-                // Press Halo Ring around the cursor tip (16, 14)
+                // 1. Futuristic Pulse Ring around the cursor tip (18, 16) on press
                 if viewModel.isPressed {
                     Circle()
-                        .stroke(Color.cyan, lineWidth: 2.5)
-                        .background(Circle().fill(Color.cyan.opacity(0.25)))
-                        .frame(width: 28, height: 28)
-                        .position(x: 16, y: 14)
+                        .stroke(
+                            LinearGradient(
+                                colors: [Color.cyan, Color.blue],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            ),
+                            lineWidth: 2.2
+                        )
+                        .background(Circle().fill(Color.cyan.opacity(0.22)))
+                        .frame(width: 26, height: 26)
+                        .position(x: 18, y: 16)
                         .transition(.scale.combined(with: .opacity))
                 }
 
-                // Vector Cursor + Floating Agent Pill
+                // 2. Ambient Tip Energy Halo
+                Circle()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                (viewModel.isPressed ? Color.orange : Color.cyan).opacity(0.55),
+                                Color.clear
+                            ],
+                            center: .center,
+                            startRadius: 0,
+                            endRadius: 9
+                        )
+                    )
+                    .frame(width: 18, height: 18)
+                    .position(x: 18, y: 16)
+
+                // 3. Sleek Tailless Sci-Fi Cyber-Dart Pointer (No @eXX badge, no tail)
                 ZStack(alignment: .topLeading) {
+                    // Outer holographic blade
                     VirtualCursorArrowShape()
                         .fill(
                             LinearGradient(
                                 colors: [
-                                    Color(red: 0.05, green: 0.82, blue: 0.98),
-                                    Color(red: 0.22, green: 0.45, blue: 0.98)
+                                    Color(red: 0.00, green: 0.96, blue: 1.00), // Electric Cyan
+                                    Color(red: 0.16, green: 0.52, blue: 1.00), // Plasma Blue
+                                    Color(red: 0.42, green: 0.28, blue: 0.98)  // Cyber Indigo
                                 ],
                                 startPoint: .topLeading,
                                 endPoint: .bottomTrailing
@@ -235,38 +289,39 @@ struct VirtualCursorRootView: View {
                         )
                         .overlay(
                             VirtualCursorArrowShape()
-                                .stroke(Color.white, style: StrokeStyle(lineWidth: 1.8, lineJoin: .round))
+                                .stroke(
+                                    LinearGradient(
+                                        colors: [
+                                            Color.white,
+                                            Color(red: 0.65, green: 0.95, blue: 1.0)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    ),
+                                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
+                                )
                         )
-                        .frame(width: 20, height: 28)
-                        .shadow(color: Color.cyan.opacity(0.65), radius: 5, x: 0, y: 2)
-                        .scaleEffect(viewModel.stretchScale, anchor: .topLeading)
-                        .rotationEffect(.degrees(viewModel.tiltAngleDegrees), anchor: .topLeading)
 
-                    // Agent Badge Pill attached near the cursor tail
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(viewModel.isPressed ? Color.orange : Color.cyan)
-                            .frame(width: 5, height: 5)
-                        Text(viewModel.badgeText)
-                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                    }
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2.5)
-                    .background(
-                        Capsule()
-                            .fill(Color.black.opacity(0.82))
-                            .overlay(
-                                Capsule().strokeBorder(Color.cyan.opacity(0.7), lineWidth: 1)
+                    // Inner glowing energy core facet
+                    VirtualCursorCoreFacetShape()
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.85),
+                                    (viewModel.isPressed ? Color.orange : Color.cyan).opacity(0.55)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
                             )
-                    )
-                    .shadow(color: Color.black.opacity(0.35), radius: 3, y: 1)
-                    .offset(x: 16, y: 20)
+                        )
                 }
-                .offset(x: 16, y: 14)
+                .frame(width: 20, height: 24)
+                .shadow(color: Color.cyan.opacity(0.78), radius: 6, x: 0, y: 1)
+                .scaleEffect(viewModel.stretchScale, anchor: .topLeading)
+                .rotationEffect(.degrees(viewModel.tiltAngleDegrees), anchor: .topLeading)
+                .offset(x: 18, y: 16)
             }
         }
-        .frame(width: 136, height: 68, alignment: .topLeading)
+        .frame(width: 64, height: 64, alignment: .topLeading)
     }
 }
