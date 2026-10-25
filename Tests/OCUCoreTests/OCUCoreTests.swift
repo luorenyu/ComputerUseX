@@ -180,8 +180,42 @@ final class OCUCoreTests: XCTestCase {
             XCTFail("Invalid MCP tools/list response")
             return
         }
-        XCTAssertEqual(tools.count, 10)
+        XCTAssertEqual(tools.count, 11)
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_snapshot" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_click" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_batch" }))
+    }
+
+    func testSnapshotFormatCompactAndWindowOriginMapping() {
+        // Test window-cropped Vision OCR coordinate conversion with non-zero origin (e.g. secondary display window)
+        let windowBounds = ScreenRect(x: 1787, y: 97, width: 791, height: 840)
+        let normalized = CGRect(x: 0.5, y: 0.5, width: 0.1, height: 0.05)
+        let mapped = VisionOCRScanner.convertNormalizedVisionRect(normalized, in: windowBounds)
+        XCTAssertEqual(mapped.x, 1787 + 791 * 0.5, accuracy: 0.5)
+        XCTAssertEqual(mapped.y, 97 + 840 * 0.45, accuracy: 0.5)
+
+        let el = UIElementRef(
+            ref: "@e22",
+            source: .ocr,
+            role: "ocrText",
+            label: "黑骑士",
+            frame: ScreenRect(x: 1772, y: 472, width: 41, height: 14),
+            appName: "微信",
+            pid: 42553
+        )
+        let snap = SnapshotResult(
+            snapshotId: "ab12cd34",
+            activeApp: "微信",
+            activePid: 42553,
+            windowTitle: "微信",
+            screenBounds: windowBounds,
+            scaleFactor: 1.0,
+            axCount: 0,
+            ocrCount: 1,
+            elements: [el]
+        )
+        let compactText = snap.formatCompact()
+        XCTAssertTrue(compactText.contains("# snap:ab12cd34 | app:微信(42553)"))
+        XCTAssertTrue(compactText.contains("@e22|ocr|ocrText|1793,479|黑骑士"))
     }
 }

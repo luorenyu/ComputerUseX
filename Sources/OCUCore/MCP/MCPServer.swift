@@ -99,14 +99,22 @@ public final class MCPServer: @unchecked Sendable {
         var contentBlocks: [[String: Any]] = []
 
         if let snap = resp.snapshot {
-            var copyWithoutBase64 = snap
-            copyWithoutBase64.imageBase64 = nil
-            if let textData = try? encoder.encode(copyWithoutBase64),
-               let textStr = String(data: textData, encoding: .utf8) {
+            let useCompact = req.compact ?? true
+            if useCompact {
                 contentBlocks.append([
                     "type": "text",
-                    "text": textStr
+                    "text": snap.formatCompact()
                 ])
+            } else {
+                var copyWithoutBase64 = snap
+                copyWithoutBase64.imageBase64 = nil
+                if let textData = try? encoder.encode(copyWithoutBase64),
+                   let textStr = String(data: textData, encoding: .utf8) {
+                    contentBlocks.append([
+                        "type": "text",
+                        "text": textStr
+                    ])
+                }
             }
             if let b64 = snap.imageBase64, !b64.isEmpty {
                 contentBlocks.append([
@@ -157,6 +165,9 @@ public final class MCPServer: @unchecked Sendable {
                 app: arguments["app"] as? String,
                 ocr: arguments["ocr"] as? Bool ?? true,
                 som: arguments["som"] as? Bool ?? false,
+                focus: arguments["focus"] as? Bool ?? false,
+                compact: arguments["compact"] as? Bool ?? true,
+                windowOnly: arguments["window_only"] as? Bool ?? true,
                 outputPath: arguments["output"] as? String
             )
         case "ocu_click":
@@ -166,6 +177,8 @@ public final class MCPServer: @unchecked Sendable {
                 target: arguments["target"] as? String,
                 x: doubleVal(arguments["x"]),
                 y: doubleVal(arguments["y"]),
+                dx: doubleVal(arguments["dx"]),
+                dy: doubleVal(arguments["dy"]),
                 button: MouseButton(rawValue: btnStr) ?? .left,
                 clickCount: intVal(arguments["count"]) ?? 1,
                 axNative: arguments["ax_native"] as? Bool ?? false
@@ -175,16 +188,30 @@ public final class MCPServer: @unchecked Sendable {
                 command: "move",
                 target: arguments["target"] as? String,
                 x: doubleVal(arguments["x"]),
-                y: doubleVal(arguments["y"])
+                y: doubleVal(arguments["y"]),
+                dx: doubleVal(arguments["dx"]),
+                dy: doubleVal(arguments["dy"])
             )
         case "ocu_type":
             return IPCRequest(
                 command: "type",
                 target: arguments["target"] as? String,
+                x: doubleVal(arguments["x"]),
+                y: doubleVal(arguments["y"]),
+                dx: doubleVal(arguments["dx"]),
+                dy: doubleVal(arguments["dy"]),
                 text: arguments["text"] as? String ?? "",
                 submit: arguments["submit"] as? Bool ?? false,
                 clearFirst: arguments["clear"] as? Bool ?? false
             )
+        case "ocu_batch":
+            let rawSteps = arguments["steps"] as? [[String: Any]] ?? []
+            let parsedSteps = rawSteps.map { stepDict -> IPCRequest in
+                let rawCmd = (stepDict["command"] as? String) ?? (stepDict["tool"] as? String) ?? "click"
+                let normalizedTool = rawCmd.hasPrefix("ocu_") ? rawCmd : "ocu_\(rawCmd)"
+                return buildIPCRequest(for: normalizedTool, arguments: stepDict)
+            }
+            return IPCRequest(command: "batch", steps: parsedSteps)
         case "ocu_press":
             return IPCRequest(
                 command: "press",
@@ -295,6 +322,9 @@ public final class MCPServer: @unchecked Sendable {
                     "type": "object",
                     "properties": [
                         "app": ["type": "string", "description": "Optional application name to target (defaults to frontmost app)"],
+                        "focus": ["type": "boolean", "description": "Focus/activate the target app before scanning (default: false)"],
+                        "window_only": ["type": "boolean", "description": "Capture and OCR only the target app's window to eliminate background desktop noise (default: true)"],
+                        "compact": ["type": "boolean", "description": "Return token-compact tabular element output '@eX|src|role|x,y|label' (default: true)"],
                         "ocr": ["type": "boolean", "description": "Include Apple Vision OCR text detection for canvas/custom UI elements (default: true)"],
                         "som": ["type": "boolean", "description": "Return a Set-of-Marks (SoM) annotated screenshot with @eX badges and coordinate rulers (default: false)"],
                         "output": ["type": "string", "description": "Optional file path to save the screenshot PNG"]
@@ -303,13 +333,15 @@ public final class MCPServer: @unchecked Sendable {
             ],
             [
                 "name": "ocu_click",
-                "description": "Click a UI element by reference (@e1), fuzzy label text, or screen (x, y) coordinates with smooth Bézier cursor trajectory and visual HUD ripple.",
+                "description": "Click a UI element by reference (@e1), fuzzy label text, or screen (x, y) coordinates with optional relative offset (dx, dy), smooth Bézier cursor trajectory, and visual HUD ripple.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "target": ["type": "string", "description": "Element reference like '@e1' or visible text label"],
                         "x": ["type": "number", "description": "Screen X coordinate (if target is not specified)"],
                         "y": ["type": "number", "description": "Screen Y coordinate (if target is not specified)"],
+                        "dx": ["type": "number", "description": "Relative X offset in points from target anchor (e.g. -150 to click left of @e37)"],
+                        "dy": ["type": "number", "description": "Relative Y offset in points from target anchor (e.g. -45 to click above @e37)"],
                         "button": ["type": "string", "enum": ["left", "right", "center"], "description": "Mouse button (default: left)"],
                         "count": ["type": "integer", "description": "Click count: 1 for single click, 2 for double click (default: 1)"],
                         "ax_native": ["type": "boolean", "description": "Try triggering native kAXPressAction without moving physical mouse first (default: false)"]
@@ -318,28 +350,49 @@ public final class MCPServer: @unchecked Sendable {
             ],
             [
                 "name": "ocu_move",
-                "description": "Smoothly move the mouse cursor to an element (@e1) or (x, y) coordinate along a human-like Bézier curve.",
+                "description": "Smoothly move the mouse cursor to an element (@e1) or (x, y) coordinate (with optional dx, dy offset) along a human-like Bézier curve.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "target": ["type": "string", "description": "Element reference like '@e1' or label"],
                         "x": ["type": "number", "description": "Screen X coordinate"],
-                        "y": ["type": "number", "description": "Screen Y coordinate"]
+                        "y": ["type": "number", "description": "Screen Y coordinate"],
+                        "dx": ["type": "number", "description": "Relative X offset from target"],
+                        "dy": ["type": "number", "description": "Relative Y offset from target"]
                     ]
                 ]
             ],
             [
                 "name": "ocu_type",
-                "description": "Type text (English, Chinese, Emoji, or multi-line) into the focused field or a target element (@e1). Uses safe clipboard transaction to prevent IME garbling.",
+                "description": "Type text (English, Chinese, Emoji, or multi-line) into the focused field, a target element (@e1), a relative offset from @e1 (dx, dy), or (x, y) coordinates. Uses safe clipboard transaction to prevent IME garbling.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
                         "text": ["type": "string", "description": "Text content to type"],
                         "target": ["type": "string", "description": "Optional element reference (@e1) to click before typing"],
+                        "x": ["type": "number", "description": "Optional X coordinate to click before typing"],
+                        "y": ["type": "number", "description": "Optional Y coordinate to click before typing"],
+                        "dx": ["type": "number", "description": "Optional relative X offset from target to click before typing"],
+                        "dy": ["type": "number", "description": "Optional relative Y offset from target to click before typing"],
                         "clear": ["type": "boolean", "description": "Select all (Cmd+A) and delete existing text before typing (default: false)"],
                         "submit": ["type": "boolean", "description": "Press Return/Enter after typing (default: false)"]
                     ],
                     "required": ["text"]
+                ]
+            ],
+            [
+                "name": "ocu_batch",
+                "description": "Execute a sequence of UI actions (click, type, press, wait, snapshot) in a single atomic round-trip to minimize LLM turns and latency.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "steps": [
+                            "type": "array",
+                            "description": "Ordered list of action step objects (e.g. [{\"command\":\"click\",\"target\":\"@e22\"}, {\"command\":\"type\",\"target\":\"@e37\",\"dx\":-150,\"dy\":-45,\"text\":\"你好\",\"submit\":true}])",
+                            "items": ["type": "object"]
+                        ]
+                    ],
+                    "required": ["steps"]
                 ]
             ],
             [

@@ -44,6 +44,8 @@ public final class OCUCommandExecutor: @unchecked Sendable {
             case "snapshot":
                 let snap = try ElementSnapshotStore.shared.captureSnapshot(
                     appName: request.app,
+                    focusFirst: request.focus ?? false,
+                    windowOnly: request.windowOnly ?? true,
                     enableOCR: request.ocr ?? true,
                     enableSoM: request.som ?? false,
                     outputPath: request.outputPath,
@@ -56,6 +58,8 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     target: request.target,
                     x: request.x,
                     y: request.y,
+                    dx: request.dx,
+                    dy: request.dy,
                     button: request.button ?? .left,
                     clickCount: request.clickCount ?? 1,
                     axNative: request.axNative ?? false
@@ -66,14 +70,20 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 let startTime = Date()
                 let destination: ScreenPoint
                 let desc: String
+                let offsetX = request.dx ?? 0
+                let offsetY = request.dy ?? 0
                 if let targetRef = request.target, !targetRef.isEmpty {
                     let el = try ElementSnapshotStore.shared.resolveTarget(targetRef)
-                    destination = el.centerPoint
-                    desc = "\(el.ref) [\(el.label)]"
+                    destination = ScreenPoint(x: el.centerPoint.x + offsetX, y: el.centerPoint.y + offsetY)
+                    if abs(offsetX) > 0.1 || abs(offsetY) > 0.1 {
+                        desc = "\(el.ref) [\(el.label)] + offset(\(Int(offsetX)),\(Int(offsetY)))"
+                    } else {
+                        desc = "\(el.ref) [\(el.label)]"
+                    }
                     KillSwitchMonitor.shared.emitHUDEvent(.highlightElement(rect: el.frame, label: el.ref))
                 } else if let px = request.x, let py = request.y {
-                    destination = ScreenPoint(x: px, y: py)
-                    desc = "(\(Int(px)), \(Int(py)))"
+                    destination = ScreenPoint(x: px + offsetX, y: py + offsetY)
+                    desc = "(\(Int(destination.x)), \(Int(destination.y)))"
                 } else {
                     throw OCUError(
                         code: .invalidArguments,
@@ -102,10 +112,66 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 let outcome = try KeyboardController.shared.typeText(
                     text,
                     target: request.target,
+                    x: request.x,
+                    y: request.y,
+                    dx: request.dx,
+                    dy: request.dy,
                     clearFirst: request.clearFirst ?? false,
                     submit: request.submit ?? false
                 )
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "batch":
+                guard let steps = request.steps, !steps.isEmpty else {
+                    throw OCUError(
+                        code: .invalidArguments,
+                        message: "Batch command requires a non-empty 'steps' array.",
+                        recoveryHint: "Provide steps to execute sequentially."
+                    )
+                }
+                let batchStart = Date()
+                var outcomes: [ActionOutcome] = []
+                var lastSnapshot: SnapshotResult? = nil
+                for (idx, step) in steps.enumerated() {
+                    let stepResp = execute(step, isDaemonContext: isDaemonContext)
+                    if !stepResp.ok {
+                        return IPCResponse(
+                            id: request.id,
+                            ok: false,
+                            snapshot: lastSnapshot,
+                            batchOutcomes: outcomes,
+                            error: stepResp.error
+                        )
+                    }
+                    if let out = stepResp.outcome {
+                        outcomes.append(out)
+                    }
+                    if let snap = stepResp.snapshot {
+                        lastSnapshot = snap
+                        outcomes.append(ActionOutcome(
+                            action: "snapshot",
+                            targetDescription: "\(snap.activeApp) (\(snap.elements.count) elements)",
+                            elapsedMs: 0
+                        ))
+                    }
+                    if idx + 1 < steps.count {
+                        Thread.sleep(forTimeInterval: 0.08)
+                    }
+                }
+                let totalMs = Int(Date().timeIntervalSince(batchStart) * 1000)
+                let summary = ActionOutcome(
+                    action: "batch(\(steps.count) steps)",
+                    targetDescription: outcomes.map { "\($0.action):\($0.targetDescription)" }.joined(separator: " -> "),
+                    point: outcomes.last?.point,
+                    elapsedMs: totalMs
+                )
+                return IPCResponse(
+                    id: request.id,
+                    ok: true,
+                    snapshot: lastSnapshot,
+                    outcome: summary,
+                    batchOutcomes: outcomes
+                )
 
             case "press":
                 guard let keys = request.keys, !keys.isEmpty else {

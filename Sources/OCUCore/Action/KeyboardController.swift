@@ -97,6 +97,10 @@ public final class KeyboardController: @unchecked Sendable {
     public func typeText(
         _ text: String,
         target: String? = nil,
+        x: Double? = nil,
+        y: Double? = nil,
+        dx: Double? = nil,
+        dy: Double? = nil,
         clearFirst: Bool = false,
         submit: Bool = false
     ) throws -> ActionOutcome {
@@ -104,9 +108,19 @@ public final class KeyboardController: @unchecked Sendable {
         try KillSwitchMonitor.shared.verifySafeToProceed()
 
         var clickedPoint: ScreenPoint? = nil
-        if let targetRef = target, !targetRef.isEmpty {
-            let clickRes = try MouseController.shared.click(target: targetRef, button: .left, clickCount: 1)
+        var targetDesc = target ?? "focused field"
+        if (target != nil && !target!.isEmpty) || (x != nil && y != nil) {
+            let clickRes = try MouseController.shared.click(
+                target: target,
+                x: x,
+                y: y,
+                dx: dx,
+                dy: dy,
+                button: .left,
+                clickCount: 1
+            )
             clickedPoint = clickRes.point
+            targetDesc = clickRes.targetDescription
             Thread.sleep(forTimeInterval: 0.08)
         }
 
@@ -135,7 +149,7 @@ public final class KeyboardController: @unchecked Sendable {
         KillSwitchMonitor.shared.logAction("⌨️ Typed \"\(preview)\"")
         return ActionOutcome(
             action: "type",
-            targetDescription: target ?? "focused field",
+            targetDescription: targetDesc,
             point: clickedPoint,
             details: "length=\(text.count), submit=\(submit)",
             elapsedMs: ms

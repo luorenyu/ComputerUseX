@@ -46,10 +46,35 @@ struct OCUCLI {
             return
         }
 
-        renderHumanReadable(resp)
+        renderHumanReadable(resp, compact: req.compact ?? false)
         if !resp.ok {
             Foundation.exit(1)
         }
+    }
+
+    static func splitShellWords(_ input: String) -> [String] {
+        var words: [String] = []
+        var current = ""
+        var inSingle = false
+        var inDouble = false
+        for ch in input {
+            if ch == "'" && !inDouble {
+                inSingle.toggle()
+            } else if ch == "\"" && !inSingle {
+                inDouble.toggle()
+            } else if ch.isWhitespace && !inSingle && !inDouble {
+                if !current.isEmpty {
+                    words.append(current)
+                    current = ""
+                }
+            } else {
+                current.append(ch)
+            }
+        }
+        if !current.isEmpty {
+            words.append(current)
+        }
+        return words
     }
 
     static func parseSubcommand(command: String, args: [String]) -> IPCRequest {
@@ -62,7 +87,7 @@ struct OCUCLI {
             let token = args[i]
             if token.hasPrefix("--") {
                 let key = String(token.dropFirst(2))
-                if i + 1 < args.count && !args[i + 1].hasPrefix("--") {
+                if i + 1 < args.count && (!args[i + 1].hasPrefix("--")) {
                     flags[key] = args[i + 1]
                     i += 2
                 } else {
@@ -116,11 +141,17 @@ struct OCUCLI {
         case "snapshot", "snap":
             let enableOCR = !boolFlags.contains("no-ocr")
             let enableSoM = boolFlags.contains("som") || (flags["som"] == "true")
+            let focusFirst = boolFlags.contains("focus") || (flags["focus"] == "true")
+            let compact = boolFlags.contains("compact") || (flags["compact"] == "true")
+            let windowOnly = !boolFlags.contains("full-screen")
             return IPCRequest(
                 command: "snapshot",
                 app: flags["app"] ?? positional.first,
                 ocr: enableOCR,
                 som: enableSoM,
+                focus: focusFirst,
+                compact: compact,
+                windowOnly: windowOnly,
                 outputPath: flags["output"] ?? flags["out"]
             )
 
@@ -139,6 +170,8 @@ struct OCUCLI {
                 target: flags["target"] ?? positional.first,
                 x: Double(flags["x"] ?? ""),
                 y: Double(flags["y"] ?? ""),
+                dx: Double(flags["dx"] ?? flags["offset-x"] ?? ""),
+                dy: Double(flags["dy"] ?? flags["offset-y"] ?? ""),
                 button: btn,
                 clickCount: count,
                 axNative: boolFlags.contains("ax-native")
@@ -149,7 +182,9 @@ struct OCUCLI {
                 command: "move",
                 target: flags["target"] ?? positional.first,
                 x: Double(flags["x"] ?? ""),
-                y: Double(flags["y"] ?? "")
+                y: Double(flags["y"] ?? ""),
+                dx: Double(flags["dx"] ?? flags["offset-x"] ?? ""),
+                dy: Double(flags["dy"] ?? flags["offset-y"] ?? "")
             )
 
         case "type":
@@ -168,9 +203,27 @@ struct OCUCLI {
             return IPCRequest(
                 command: "type",
                 target: targetRef,
+                x: Double(flags["x"] ?? ""),
+                y: Double(flags["y"] ?? ""),
+                dx: Double(flags["dx"] ?? flags["offset-x"] ?? ""),
+                dy: Double(flags["dy"] ?? flags["offset-y"] ?? ""),
                 text: textVal,
                 submit: boolFlags.contains("submit") || boolFlags.contains("enter"),
                 clearFirst: boolFlags.contains("clear")
+            )
+
+        case "batch":
+            var stepReqs: [IPCRequest] = []
+            for item in positional {
+                let words = splitShellWords(item)
+                guard let subCmd = words.first else { continue }
+                let subReq = parseSubcommand(command: subCmd, args: Array(words.dropFirst()))
+                stepReqs.append(subReq)
+            }
+            return IPCRequest(
+                command: "batch",
+                compact: boolFlags.contains("compact"),
+                steps: stepReqs
             )
 
         case "press", "key":
@@ -228,7 +281,7 @@ struct OCUCLI {
         }
     }
 
-    static func renderHumanReadable(_ resp: IPCResponse) {
+    static func renderHumanReadable(_ resp: IPCResponse, compact: Bool = false) {
         if !resp.ok {
             if let err = resp.error {
                 print("❌ [\(err.code.rawValue)] \(err.message)")
@@ -266,21 +319,25 @@ struct OCUCLI {
         }
 
         if let snap = resp.snapshot {
-            print("📸 Snapshot [\(snap.snapshotId)] — App: \(snap.activeApp) (PID \(snap.activePid)) | Window: \(snap.windowTitle ?? "-")")
-            print("   Elements: \(snap.elements.count) total (AX: \(snap.axCount), Vision OCR: \(snap.ocrCount))")
-            if let somPath = snap.annotatedScreenshotPath {
-                print("   SoM Annotated Image: \(somPath)")
-            } else if let rawPath = snap.screenshotPath {
-                print("   Screenshot Image: \(rawPath)")
-            }
-            print("────────────────────────────────────────────────────────────────────────")
-            for el in snap.elements {
-                let tag = el.ref.padding(toLength: 5, withPad: " ", startingAt: 0)
-                let src = el.source.rawValue.uppercased().padding(toLength: 3, withPad: " ", startingAt: 0)
-                let role = el.role.padding(toLength: 12, withPad: " ", startingAt: 0)
-                let coords = "(\(Int(el.centerPoint.x)),\(Int(el.centerPoint.y)))".padding(toLength: 11, withPad: " ", startingAt: 0)
-                let valSuffix = (el.value != nil && !el.value!.isEmpty && el.value != el.label) ? " = \"\(el.value!)\"" : ""
-                print(" \(tag) [\(src)] \(role) \(coords) \"\(el.label)\"\(valSuffix)")
+            if compact {
+                print(snap.formatCompact())
+            } else {
+                print("📸 Snapshot [\(snap.snapshotId)] — App: \(snap.activeApp) (PID \(snap.activePid)) | Window: \(snap.windowTitle ?? "-")")
+                print("   Elements: \(snap.elements.count) total (AX: \(snap.axCount), Vision OCR: \(snap.ocrCount))")
+                if let somPath = snap.annotatedScreenshotPath {
+                    print("   SoM Annotated Image: \(somPath)")
+                } else if let rawPath = snap.screenshotPath {
+                    print("   Screenshot Image: \(rawPath)")
+                }
+                print("────────────────────────────────────────────────────────────────────────")
+                for el in snap.elements {
+                    let tag = el.ref.padding(toLength: 5, withPad: " ", startingAt: 0)
+                    let src = el.source.rawValue.uppercased().padding(toLength: 3, withPad: " ", startingAt: 0)
+                    let role = el.role.padding(toLength: 12, withPad: " ", startingAt: 0)
+                    let coords = "(\(Int(el.centerPoint.x)),\(Int(el.centerPoint.y)))".padding(toLength: 11, withPad: " ", startingAt: 0)
+                    let valSuffix = (el.value != nil && !el.value!.isEmpty && el.value != el.label) ? " = \"\(el.value!)\"" : ""
+                    print(" \(tag) [\(src)] \(role) \(coords) \"\(el.label)\"\(valSuffix)")
+                }
             }
         }
 
@@ -349,13 +406,15 @@ struct OCUCLI {
           doctor                              Run full diagnostic check on permissions, OCR, and MCP readiness
           apps [--focus <app>] [--launch <app>] [--resize x,y,w,h]
                                               List running GUI apps & windows, or focus/launch/resize an app
-          snapshot [--app <name>] [--no-ocr] [--som] [--output <path>]
+          snapshot [--app <name>] [--focus] [--compact] [--full-screen] [--no-ocr] [--som] [--output <path>]
                                               Scan UI via AX Tree + Apple Vision OCR and assign @e1..@eN refs
-          click <@eX|label> [--right] [--double] [--ax-native]
+          click <@eX|label> [--dx <num>] [--dy <num>] [--right] [--double] [--ax-native]
           click --x <num> --y <num>           Smoothly move cursor with HUD ripple and click target
-          move <@eX> | --x <num> --y <num>    Glide cursor along a cubic Bézier curve to target
-          type [<@eX>] <text> [--clear] [--submit]
-                                              Focus optional @eX and type Chinese/English/Emoji safely
+          move <@eX> [--dx <num>] [--dy <num>] | --x <num> --y <num>
+                                              Glide cursor along a cubic Bézier curve to target
+          type [<@eX>] [--dx <num>] [--dy <num>] [--x <num> --y <num>] <text> [--clear] [--submit]
+                                              Focus optional @eX (or offset/coords) and type text safely
+          batch "<cmd1>" "<cmd2>" [...]       Execute multiple actions sequentially in one atomic round-trip
           press <shortcut>                    Press key or combo (e.g. 'enter', 'cmd+c', 'cmd+shift+p')
           scroll --dy <pixels> [--dx <pixels>] [--target <@eX>]
                                               Smooth pixel scrolling

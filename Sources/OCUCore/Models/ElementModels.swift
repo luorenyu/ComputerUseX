@@ -147,4 +147,24 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         self.annotatedScreenshotPath = annotatedScreenshotPath
         self.imageBase64 = imageBase64
     }
+
+    /// Formats the snapshot in a token-compact tabular form (`@eX|src|role|x,y|label`), saving ~60% LLM context tokens.
+    public func formatCompact() -> String {
+        var lines: [String] = []
+        let b = screenBounds
+        let boundsDesc = "[\(Int(b.x)),\(Int(b.y)) \(Int(b.width))x\(Int(b.height))]"
+        lines.append("# snap:\(snapshotId) | app:\(activeApp)(\(activePid)) | win:\(windowTitle ?? "-") \(boundsDesc) | total:\(elements.count)(ax:\(axCount),ocr:\(ocrCount))")
+        if let som = annotatedScreenshotPath {
+            lines.append("# som:\(som)")
+        } else if let raw = screenshotPath {
+            lines.append("# img:\(raw)")
+        }
+        for el in elements {
+            let cx = Int(el.centerPoint.x.rounded())
+            let cy = Int(el.centerPoint.y.rounded())
+            let valPart = (el.value != nil && !el.value!.isEmpty && el.value != el.label) ? "=\(el.value!)" : ""
+            lines.append("\(el.ref)|\(el.source.rawValue)|\(el.role)|\(cx),\(cy)|\(el.label)\(valPart)")
+        }
+        return lines.joined(separator: "\n")
+    }
 }

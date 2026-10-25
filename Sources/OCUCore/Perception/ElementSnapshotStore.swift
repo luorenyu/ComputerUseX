@@ -25,11 +25,20 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
     public func captureSnapshot(
         appName: String? = nil,
+        focusFirst: Bool = false,
+        windowOnly: Bool = true,
         enableOCR: Bool = true,
         enableSoM: Bool = false,
         outputPath: String? = nil,
         includeBase64: Bool = false
     ) throws -> SnapshotResult {
+        if focusFirst, let targetApp = appName, !targetApp.isEmpty {
+            _ = try? AppWorkspaceController.shared.focusOrLaunchApp(
+                identifierOrName: targetApp,
+                launchIfNeeded: true
+            )
+        }
+
         KillSwitchMonitor.shared.emitHUDEvent(
             .statusPill(title: "🔍 正在扫描界面元素 (Snapshot)...", subtitle: appName ?? "当前窗口")
         )
@@ -37,17 +46,27 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         // 1. Scan Accessibility Tree
         let axScan = AXScanner.shared.scanApplication(appNameFilter: appName)
         var axElements = axScan.elements
+        if windowOnly, let winRect = axScan.windowFrame {
+            let inWinAX = axElements.filter { $0.frame.intersectionArea(with: winRect) > 0 }
+            if !inWinAX.isEmpty {
+                axElements = inWinAX
+            }
+        }
         var ocrElements: [UIElementRef] = []
         var capturedImage: CGImage? = nil
-        var displayBounds = PermissionManager.shared.displayContaining(
-            point: axScan.windowFrame?.center ?? PermissionManager.shared.mainScreenBounds().center
+        var displayBounds = axScan.windowFrame ?? PermissionManager.shared.displayContaining(
+            point: PermissionManager.shared.mainScreenBounds().center
         ).bounds
         var scaleFactor = PermissionManager.shared.mainScreenScaleFactor()
 
-        // 2. Capture the display containing the target window if OCR, SoM, or outputPath is requested
+        // 2. Capture the target window (or display if !windowOnly) if OCR, SoM, or outputPath is requested
         let needsScreenImage = enableOCR || enableSoM || (outputPath != nil) || includeBase64 || (axElements.count < 12)
         if needsScreenImage {
-            if let capture = try? ScreenCaptureService.shared.captureDisplayImage(for: axScan.windowFrame) {
+            if let capture = try? ScreenCaptureService.shared.captureDisplayImage(
+                for: axScan.windowFrame,
+                pid: axScan.pid,
+                windowOnly: windowOnly
+            ) {
                 capturedImage = capture.image
                 displayBounds = capture.logicalBounds
                 scaleFactor = capture.scaleFactor
@@ -63,8 +82,8 @@ public final class ElementSnapshotStore: @unchecked Sendable {
                 pid: axScan.pid,
                 windowTitle: axScan.windowTitle
             )
-            // If we know the target window's bounding box, prioritize OCR candidates inside that window
-            if let winRect = axScan.windowFrame {
+            // Strictly filter out background desktop noise when windowOnly is active and windowFrame is valid
+            if windowOnly, let winRect = axScan.windowFrame {
                 let inWindow = candidates.filter { $0.frame.intersectionArea(with: winRect) > 0 }
                 if !inWindow.isEmpty {
                     candidates = inWindow

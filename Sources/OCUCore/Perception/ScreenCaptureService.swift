@@ -10,14 +10,25 @@ public final class ScreenCaptureService: @unchecked Sendable {
 
     private init() {}
 
-    /// Captures the display containing `targetRect` (or main display if nil) using native ScreenCaptureKit
-    /// in-process (excluding OpenComputerUse's own HUD overlay), with fallback to `/usr/sbin/screencapture`.
-    public func captureDisplayImage(for targetRect: ScreenRect? = nil) throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
+    /// Captures the target application window (when `windowOnly` is true and `pid`/`targetRect` are known)
+    /// or the display containing `targetRect` using native ScreenCaptureKit in-process.
+    public func captureDisplayImage(
+        for targetRect: ScreenRect? = nil,
+        pid: Int32? = nil,
+        windowOnly: Bool = true
+    ) throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
         let targetPoint = targetRect?.center ?? PermissionManager.shared.mainScreenBounds().center
         let displayInfo = PermissionManager.shared.displayContaining(point: targetPoint)
 
-        // 1. Try native in-process ScreenCaptureKit capture first
-        if let scResult = captureViaScreenCaptureKit(displayID: displayInfo.id, fallbackBounds: displayInfo.bounds, scale: displayInfo.scale) {
+        // 1. Try native in-process ScreenCaptureKit capture first (window-cropped if windowOnly == true)
+        if let scResult = captureViaScreenCaptureKit(
+            displayID: displayInfo.id,
+            targetRect: targetRect,
+            pid: pid,
+            windowOnly: windowOnly,
+            fallbackBounds: displayInfo.bounds,
+            scale: displayInfo.scale
+        ) {
             return scResult
         }
 
@@ -49,11 +60,18 @@ public final class ScreenCaptureService: @unchecked Sendable {
         }
 
         let scale = displayInfo.bounds.width > 0 ? Double(cgImage.width) / displayInfo.bounds.width : displayInfo.scale
+        if windowOnly, let cropRect = targetRect,
+           let cropped = cropImage(cgImage, to: cropRect, displayBounds: displayInfo.bounds, scale: scale) {
+            return (cropped, cropRect, scale)
+        }
         return (cgImage, displayInfo.bounds, scale)
     }
 
     private func captureViaScreenCaptureKit(
         displayID: CGDirectDisplayID,
+        targetRect: ScreenRect?,
+        pid: Int32?,
+        windowOnly: Bool,
         fallbackBounds: ScreenRect,
         scale: Double
     ) -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double)? {
@@ -65,7 +83,46 @@ public final class ScreenCaptureService: @unchecked Sendable {
         Task.detached {
             defer { semaphore.signal() }
             do {
-                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+
+                // Fast path: capture only the target application's window when windowOnly is enabled
+                if windowOnly, let targetPid = pid, targetPid > 0 {
+                    let appWindows = content.windows.filter { win in
+                        win.owningApplication?.processID == targetPid &&
+                        win.windowLayer == 0 &&
+                        win.frame.width >= 120 &&
+                        win.frame.height >= 120
+                    }
+                    let matchedWindow: SCWindow? = {
+                        if let tr = targetRect {
+                            return appWindows.max(by: { a, b in
+                                ScreenRect(a.frame).intersectionArea(with: tr) < ScreenRect(b.frame).intersectionArea(with: tr)
+                            })
+                        }
+                        return appWindows.max(by: { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) })
+                    }()
+
+                    if let scWin = matchedWindow {
+                        let winRect = ScreenRect(scWin.frame)
+                        let winFilter = SCContentFilter(desktopIndependentWindow: scWin)
+                        let winConfig = SCStreamConfiguration()
+                        let pw = max(Int(winRect.width), Int((winRect.width * scale).rounded()))
+                        let ph = max(Int(winRect.height), Int((winRect.height * scale).rounded()))
+                        winConfig.width = pw
+                        winConfig.height = ph
+                        winConfig.showsCursor = false
+                        if let winImg = try? await SCScreenshotManager.captureImage(
+                            contentFilter: winFilter,
+                            configuration: winConfig
+                        ) {
+                            captured = winImg
+                            resolvedBounds = winRect
+                            resolvedScale = winRect.width > 0 ? Double(winImg.width) / winRect.width : scale
+                            return
+                        }
+                    }
+                }
+
                 guard let scDisplay = content.displays.first(where: { $0.displayID == displayID }) ?? content.displays.first else {
                     return
                 }
@@ -82,8 +139,8 @@ public final class ScreenCaptureService: @unchecked Sendable {
                     exceptingWindows: []
                 )
                 let config = SCStreamConfiguration()
-                let pixelW = Int( Double(scDisplay.width) * scale )
-                let pixelH = Int( Double(scDisplay.height) * scale )
+                let pixelW = Int(Double(scDisplay.width) * scale)
+                let pixelH = Int(Double(scDisplay.height) * scale)
                 config.width = max(scDisplay.width, pixelW)
                 config.height = max(scDisplay.height, pixelH)
                 config.showsCursor = false
@@ -92,9 +149,16 @@ public final class ScreenCaptureService: @unchecked Sendable {
                     contentFilter: filter,
                     configuration: config
                 )
-                captured = img
-                if displayRect.width > 0 {
-                    resolvedScale = Double(img.width) / displayRect.width
+                let actualScale = displayRect.width > 0 ? Double(img.width) / displayRect.width : scale
+                if windowOnly, let cropRect = targetRect,
+                   let cropped = self.cropImage(img, to: cropRect, displayBounds: displayRect, scale: actualScale) {
+                    captured = cropped
+                    resolvedBounds = cropRect
+                    resolvedScale = actualScale
+                } else {
+                    captured = img
+                    resolvedBounds = displayRect
+                    resolvedScale = actualScale
                 }
             } catch {
                 return
@@ -104,6 +168,20 @@ public final class ScreenCaptureService: @unchecked Sendable {
         _ = semaphore.wait(timeout: .now() + 2.5)
         guard let finalImage = captured else { return nil }
         return (finalImage, resolvedBounds, resolvedScale)
+    }
+
+    private func cropImage(
+        _ image: CGImage,
+        to targetRect: ScreenRect,
+        displayBounds: ScreenRect,
+        scale: Double
+    ) -> CGImage? {
+        let localX = max(0, (targetRect.x - displayBounds.x) * scale)
+        let localY = max(0, (targetRect.y - displayBounds.y) * scale)
+        let cropW = min(Double(image.width) - localX, targetRect.width * scale)
+        let cropH = min(Double(image.height) - localY, targetRect.height * scale)
+        guard cropW >= 40, cropH >= 40 else { return nil }
+        return image.cropping(to: CGRect(x: localX, y: localY, width: cropW, height: cropH))
     }
 
     public func savePNG(_ image: CGImage, to path: String) throws {

@@ -130,9 +130,12 @@ public struct IPCRequest: Codable, Sendable {
     public var clearFirst: Bool?
     public var launch: Bool?
     public var focus: Bool?
+    public var compact: Bool?
+    public var windowOnly: Bool?
     public var timeout: Double?
     public var outputPath: String?
     public var hudEvent: HUDAnimationEvent?
+    public var steps: [IPCRequest]?
 
     public init(
         id: String = UUID().uuidString,
@@ -159,9 +162,12 @@ public struct IPCRequest: Codable, Sendable {
         clearFirst: Bool? = nil,
         launch: Bool? = nil,
         focus: Bool? = nil,
+        compact: Bool? = nil,
+        windowOnly: Bool? = nil,
         timeout: Double? = nil,
         outputPath: String? = nil,
-        hudEvent: HUDAnimationEvent? = nil
+        hudEvent: HUDAnimationEvent? = nil,
+        steps: [IPCRequest]? = nil
     ) {
         self.id = id
         self.command = command
@@ -187,9 +193,12 @@ public struct IPCRequest: Codable, Sendable {
         self.clearFirst = clearFirst
         self.launch = launch
         self.focus = focus
+        self.compact = compact
+        self.windowOnly = windowOnly
         self.timeout = timeout
         self.outputPath = outputPath
         self.hudEvent = hudEvent
+        self.steps = steps
     }
 }
 
@@ -200,6 +209,7 @@ public struct IPCResponse: Codable, Sendable {
     public var apps: [AppInfo]?
     public var snapshot: SnapshotResult?
     public var outcome: ActionOutcome?
+    public var batchOutcomes: [ActionOutcome]?
     public var error: OCUError?
 
     public init(
@@ -209,6 +219,7 @@ public struct IPCResponse: Codable, Sendable {
         apps: [AppInfo]? = nil,
         snapshot: SnapshotResult? = nil,
         outcome: ActionOutcome? = nil,
+        batchOutcomes: [ActionOutcome]? = nil,
         error: OCUError? = nil
     ) {
         self.id = id
@@ -217,6 +228,7 @@ public struct IPCResponse: Codable, Sendable {
         self.apps = apps
         self.snapshot = snapshot
         self.outcome = outcome
+        self.batchOutcomes = batchOutcomes
         self.error = error
     }
 }

@@ -41,6 +41,8 @@ public final class MouseController: @unchecked Sendable {
         target: String? = nil,
         x: Double? = nil,
         y: Double? = nil,
+        dx: Double? = nil,
+        dy: Double? = nil,
         button: MouseButton = .left,
         clickCount: Int = 1,
         axNative: Bool = false
@@ -51,18 +53,26 @@ public final class MouseController: @unchecked Sendable {
         var resolvedElement: UIElementRef? = nil
         let targetPoint: ScreenPoint
         let targetDesc: String
+        let offsetX = dx ?? 0
+        let offsetY = dy ?? 0
+        let hasOffset = (abs(offsetX) > 0.1 || abs(offsetY) > 0.1)
 
         if let targetRef = target, !targetRef.isEmpty {
             let el = try ElementSnapshotStore.shared.resolveTarget(targetRef)
             try KillSwitchMonitor.shared.verifyAppAllowed(el.appName)
             resolvedElement = el
-            targetPoint = el.centerPoint
-            targetDesc = "\(el.ref) [\(el.role): \(el.label)]"
+            targetPoint = ScreenPoint(x: el.centerPoint.x + offsetX, y: el.centerPoint.y + offsetY)
+            if hasOffset {
+                targetDesc = "\(el.ref) [\(el.role): \(el.label)] + offset(\(Int(offsetX)),\(Int(offsetY)))"
+            } else {
+                targetDesc = "\(el.ref) [\(el.role): \(el.label)]"
+            }
         } else if let px = x, let py = y {
-            targetPoint = ScreenPoint(x: px, y: py)
-            targetDesc = "(\(Int(px)), \(Int(py)))"
+            targetPoint = ScreenPoint(x: px + offsetX, y: py + offsetY)
+            targetDesc = "(\(Int(targetPoint.x)), \(Int(targetPoint.y)))"
         } else {
-            targetPoint = PermissionManager.shared.currentMouseLocation()
+            let current = PermissionManager.shared.currentMouseLocation()
+            targetPoint = ScreenPoint(x: current.x + offsetX, y: current.y + offsetY)
             targetDesc = "current (\(Int(targetPoint.x)), \(Int(targetPoint.y)))"
         }
 
@@ -79,8 +89,8 @@ public final class MouseController: @unchecked Sendable {
             )
         )
 
-        // Optional silent AXPress mode if requested and element supports it
-        if axNative, let el = resolvedElement, button == .left, clickCount == 1 {
+        // Optional silent AXPress mode if requested, no relative offset is applied, and element supports it
+        if axNative && !hasOffset, let el = resolvedElement, button == .left, clickCount == 1 {
             if AXScanner.shared.performNativePress(ref: el.ref) {
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .clickRipple(point: targetPoint, button: button, clickCount: clickCount)
