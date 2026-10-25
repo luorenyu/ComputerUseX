@@ -39,16 +39,35 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
             OverlayHUDWindowController.shared.viewModel.appendLog("❌ IPC Server error: \(error.localizedDescription)")
         }
 
-        timer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in
+        let t = Timer(timeInterval: 1.5, repeats: true) { [weak self] _ in
             self?.refreshPermissions()
         }
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
     public func refreshPermissions() {
+        let ax = PermissionManager.shared.isAccessibilityGranted(prompt: false)
+        let sr = PermissionManager.shared.isScreenRecordingGranted(prompt: false)
+        let tripped = KillSwitchMonitor.shared.isTripped
         DispatchQueue.main.async {
-            self.accessibilityGranted = PermissionManager.shared.isAccessibilityGranted(prompt: false)
-            self.screenRecordingGranted = PermissionManager.shared.isScreenRecordingGranted(prompt: false)
-            self.killSwitchTripped = KillSwitchMonitor.shared.isTripped
+            self.accessibilityGranted = ax
+            self.screenRecordingGranted = sr
+            self.killSwitchTripped = tripped
+        }
+    }
+
+    public func resetAndPromptAccessibility() {
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        proc.arguments = ["reset", "Accessibility", "org.opencomputeruse.app"]
+        try? proc.run()
+        proc.waitUntilExit()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            _ = PermissionManager.shared.isAccessibilityGranted(prompt: true)
+            PermissionManager.shared.openAccessibilitySettings()
+            self.refreshPermissions()
         }
     }
 
@@ -120,6 +139,12 @@ struct OpenComputerUseMenuBarApp: App {
                         .font(.system(size: 12))
                     Spacer()
                     if !coordinator.accessibilityGranted {
+                        Button("重置重授") {
+                            coordinator.resetAndPromptAccessibility()
+                        }
+                        .font(.caption)
+                        .help("当重新编译导致 macOS TCC 签名缓存失效时，一键清除旧签名记录并重新弹窗授权")
+
                         Button("去授权") {
                             _ = PermissionManager.shared.isAccessibilityGranted(prompt: true)
                             PermissionManager.shared.openAccessibilitySettings()
@@ -198,6 +223,9 @@ struct OpenComputerUseMenuBarApp: App {
             }
             .padding(12)
             .frame(width: 320)
+            .onAppear {
+                coordinator.refreshPermissions()
+            }
         }
         .menuBarExtraStyle(.window)
     }

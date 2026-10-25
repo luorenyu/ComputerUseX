@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 INSTALL_BIN_DIR="${HOME}/.local/bin"
 mkdir -p "${INSTALL_BIN_DIR}"
-ln -sf "${ROOT_DIR}/dist/OpenComputerUse.app/Contents/MacOS/ocu" "${INSTALL_BIN_DIR}/ocu"
+ln -sf "${ROOT_DIR}/dist/ocu" "${INSTALL_BIN_DIR}/ocu"
 
 echo ""
 echo "🎉 Installed 'ocu' to ${INSTALL_BIN_DIR}/ocu"
@@ -15,7 +15,7 @@ cat <<EOF
 {
   "mcpServers": {
     "open-computer-use": {
-      "command": "${ROOT_DIR}/dist/OpenComputerUse.app/Contents/MacOS/ocu",
+      "command": "${ROOT_DIR}/dist/ocu",
       "args": ["mcp"]
     }
   }
