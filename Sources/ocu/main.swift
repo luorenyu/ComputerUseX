@@ -164,12 +164,60 @@ struct OCUCLI {
                 command: "snapshot",
                 app: flags["app"] ?? positional.first,
                 windowID: winID,
+                windowTitle: flags["window-title"] ?? flags["title"],
                 ocr: enableOCR,
                 som: enableSoM,
                 focus: focusFirst,
                 compact: compact,
                 windowOnly: windowOnly,
                 outputPath: flags["output"] ?? flags["out"]
+            )
+
+        case "query", "find":
+            let enableOCR = !boolFlags.contains("no-ocr")
+            let compact = boolFlags.contains("compact") || (flags["compact"] == "true")
+            let winID = UInt32(flags["window-id"] ?? flags["window"] ?? "")
+            return IPCRequest(
+                command: "query",
+                app: flags["app"],
+                windowID: winID,
+                windowTitle: flags["window-title"] ?? flags["title"],
+                role: flags["role"],
+                text: flags["text"] ?? positional.first,
+                ocr: enableOCR,
+                compact: compact
+            )
+
+        case "upload-file", "upload":
+            let filePath = flags["path"] ?? flags["file"] ?? positional.first ?? ""
+            return IPCRequest(
+                command: "upload_file",
+                app: flags["app"],
+                text: filePath,
+                outputPath: filePath
+            )
+
+        case "secondary-action", "action":
+            let targetRef = flags["target"] ?? positional.first
+            let actionName = flags["action"] ?? (positional.count > 1 ? positional[1] : "AXShowMenu")
+            return IPCRequest(
+                command: "secondary_action",
+                target: targetRef,
+                text: actionName
+            )
+
+        case "install-mcp":
+            let targetClient = flags["target"] ?? flags["client"] ?? positional.first ?? "all"
+            return IPCRequest(
+                command: "install_mcp",
+                target: targetClient
+            )
+
+        case "audit", "logs":
+            let limit = Int(flags["limit"] ?? positional.first ?? "20") ?? 20
+            return IPCRequest(
+                command: "audit",
+                clickCount: limit
             )
 
         case "click":
@@ -431,22 +479,30 @@ struct OCUCLI {
           doctor                              Run full diagnostic check on permissions, OCR, and MCP readiness
           apps [--focus <app>] [--launch <app>] [--resize x,y,w,h]
                                               List running GUI apps & windows, or focus/launch/resize an app
-          snapshot [--app <name>] [--focus] [--compact] [--full-screen] [--no-ocr] [--som] [--output <path>]
+          snapshot [--app <name>] [--window-id <id>] [--window-title <str>] [--focus] [--compact] [--som]
                                               Scan UI via AX Tree + Apple Vision OCR and assign @e1..@eN refs
+          query [<text>] [--app <name>] [--role <role>] [--window-title <str>] [--compact]
+                                              Targeted fast lookup for matching UI elements without full dump
           click <@eX|label> [--dx <num>] [--dy <num>] [--right] [--double] [--ax-native]
           click --x <num> --y <num>           Smoothly move cursor with HUD ripple and click target
           move <@eX> [--dx <num>] [--dy <num>] | --x <num> --y <num>
                                               Glide cursor along a cubic Bézier curve to target
           type [<@eX>] [--dx <num>] [--dy <num>] [--x <num> --y <num>] <text> [--clear] [--submit]
                                               Focus optional @eX (or offset/coords) and type text safely
+          upload-file <path> [--app <name>]   Select and submit a file path in a macOS Open/Save File Dialog
+          secondary-action <@eX> [--action <AXShowMenu|AXIncrement|AXDecrement>]
+                                              Invoke native AX secondary actions on an element
           batch "<cmd1>" "<cmd2>" [...]       Execute multiple actions sequentially in one atomic round-trip
           press <shortcut>                    Press key or combo (e.g. 'enter', 'cmd+c', 'cmd+shift+p')
           scroll --dy <pixels> [--dx <pixels>] [--target <@eX>]
                                               Smooth pixel scrolling
           drag --from <@e1|x,y> --to <@e2|x,y>
-                                              Smoothly drag between two elements or points
+                                              Smoothly drag between two elements or points (with AX window move)
           wait [--text <query>] [--timeout <sec>]
                                               Wait for text to appear on screen or pause for N seconds
+          install-mcp [claude|codex|gemini|cursor|all]
+                                              One-click register OCU MCP server into AI coding agents
+          audit [--limit <N>]                 View recent structured security & action audit log entries
           hud-demo                            Run interactive visual HUD trajectory & ripple showcase
           reset                               Reset Option+Escape emergency Kill Switch
           mcp                                 Start standard Model Context Protocol (MCP) stdio server

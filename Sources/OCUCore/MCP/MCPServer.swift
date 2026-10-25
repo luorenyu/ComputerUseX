@@ -165,12 +165,38 @@ public final class MCPServer: @unchecked Sendable {
                 command: "snapshot",
                 app: arguments["app"] as? String,
                 windowID: winID,
+                windowTitle: arguments["window_title"] as? String,
                 ocr: arguments["ocr"] as? Bool ?? true,
                 som: arguments["som"] as? Bool ?? false,
                 focus: arguments["focus"] as? Bool ?? false,
                 compact: arguments["compact"] as? Bool ?? true,
                 windowOnly: arguments["window_only"] as? Bool ?? true,
                 outputPath: arguments["output"] as? String
+            )
+        case "ocu_query":
+            let winID = intVal(arguments["window_id"]).map { UInt32($0) }
+            return IPCRequest(
+                command: "query",
+                app: arguments["app"] as? String,
+                windowID: winID,
+                windowTitle: arguments["window_title"] as? String,
+                role: arguments["role"] as? String,
+                text: arguments["text"] as? String,
+                ocr: arguments["ocr"] as? Bool ?? true,
+                compact: arguments["compact"] as? Bool ?? true
+            )
+        case "ocu_upload_file":
+            return IPCRequest(
+                command: "upload_file",
+                app: arguments["app"] as? String,
+                text: arguments["path"] as? String ?? "",
+                outputPath: arguments["path"] as? String
+            )
+        case "ocu_secondary_action":
+            return IPCRequest(
+                command: "secondary_action",
+                target: arguments["target"] as? String,
+                text: arguments["action"] as? String ?? "AXShowMenu"
             )
         case "ocu_click":
             let btnStr = (arguments["button"] as? String)?.lowercased() ?? "left"
@@ -324,6 +350,8 @@ public final class MCPServer: @unchecked Sendable {
                     "type": "object",
                     "properties": [
                         "app": ["type": "string", "description": "Optional application name to target (defaults to frontmost app)"],
+                        "window_id": ["type": "integer", "description": "Optional window ID (#winID) to scope elements to a specific window"],
+                        "window_title": ["type": "string", "description": "Optional window title substring to scope elements to a specific window"],
                         "focus": ["type": "boolean", "description": "Focus/activate the target app before scanning (default: false)"],
                         "window_only": ["type": "boolean", "description": "Capture and OCR only the target app's window to eliminate background desktop noise (default: true)"],
                         "compact": ["type": "boolean", "description": "Return token-compact tabular element output '@eX|src|role|x,y|label' (default: true)"],
@@ -331,6 +359,45 @@ public final class MCPServer: @unchecked Sendable {
                         "som": ["type": "boolean", "description": "Return a Set-of-Marks (SoM) annotated screenshot with @eX badges and coordinate rulers (default: false)"],
                         "output": ["type": "string", "description": "Optional file path to save the screenshot PNG"]
                     ]
+                ]
+            ],
+            [
+                "name": "ocu_query",
+                "description": "Fast, targeted query for UI elements matching a role (e.g. 'button', 'textField') and/or text substring without returning the entire window snapshot.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "app": ["type": "string", "description": "Optional application name to query"],
+                        "window_id": ["type": "integer", "description": "Optional window ID filter"],
+                        "window_title": ["type": "string", "description": "Optional window title substring filter"],
+                        "role": ["type": "string", "description": "Optional role substring filter (e.g. 'button', 'textField', 'ocrText')"],
+                        "text": ["type": "string", "description": "Optional label or value substring filter"],
+                        "ocr": ["type": "boolean", "description": "Include Vision OCR elements if needed (default: true)"]
+                    ]
+                ]
+            ],
+            [
+                "name": "ocu_upload_file",
+                "description": "Select and submit a local file path inside an open macOS NSOpenPanel / File Picker dialog using Cmd+Shift+G path navigation.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "path": ["type": "string", "description": "Absolute or ~/ file path to select in the open file dialog"],
+                        "app": ["type": "string", "description": "Optional application name hosting the file dialog"]
+                    ],
+                    "required": ["path"]
+                ]
+            ],
+            [
+                "name": "ocu_secondary_action",
+                "description": "Perform an Accessibility secondary action on an @eX element such as 'AXShowMenu' (context menu), 'AXIncrement', 'AXDecrement', 'AXConfirm', or 'AXCancel'.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "target": ["type": "string", "description": "Element reference like '@e1'"],
+                        "action": ["type": "string", "description": "AX action name (default: 'AXShowMenu')"]
+                    ],
+                    "required": ["target"]
                 ]
             ],
             [

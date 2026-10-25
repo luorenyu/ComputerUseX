@@ -26,6 +26,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
     public func captureSnapshot(
         appName: String? = nil,
         preferredWindowID: UInt32? = nil,
+        windowTitleFilter: String? = nil,
         focusFirst: Bool = false,
         windowOnly: Bool = true,
         enableOCR: Bool = true,
@@ -33,6 +34,8 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         outputPath: String? = nil,
         includeBase64: Bool = false
     ) throws -> SnapshotResult {
+        try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: appName)
+
         if focusFirst, let targetApp = appName, !targetApp.isEmpty {
             _ = try? AppWorkspaceController.shared.focusOrLaunchApp(
                 identifierOrName: targetApp,
@@ -47,8 +50,10 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         // 1. Scan Accessibility Tree
         let axScan = AXScanner.shared.scanApplication(
             appNameFilter: appName,
-            preferredWindowID: preferredWindowID
+            preferredWindowID: preferredWindowID,
+            windowTitleFilter: windowTitleFilter
         )
+        try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: axScan.appName)
         var axElements = axScan.elements
         if windowOnly, let winRect = axScan.windowFrame {
             let inWinAX = axElements.filter { $0.frame.intersectionArea(with: winRect) > 0 }
@@ -249,6 +254,131 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             message: "Could not find UI element matching '\(target)' in active window '\(freshSnapshot.activeApp)'.",
             recoveryHint: "Call ocu_snapshot (with --ocr or --som) to inspect available @e1..@eN references."
         )
+    }
+
+    /// Instant targeted element lookup (`ocu query`) without full screenshot encoding overhead.
+    /// Updates the live snapshot in memory so returned `@eXX` references can be clicked immediately.
+    public func queryElements(
+        appName: String? = nil,
+        preferredWindowID: UInt32? = nil,
+        windowTitleFilter: String? = nil,
+        textQuery: String? = nil,
+        roleFilter: String? = nil,
+        enableOCR: Bool = false
+    ) throws -> SnapshotResult {
+        let effectiveApp = appName ?? currentSnapshot()?.activeApp
+        let snap = try captureSnapshot(
+            appName: effectiveApp,
+            preferredWindowID: preferredWindowID,
+            windowTitleFilter: windowTitleFilter,
+            focusFirst: false,
+            windowOnly: true,
+            enableOCR: enableOCR,
+            enableSoM: false,
+            outputPath: nil,
+            includeBase64: false
+        )
+        let filtered = snap.elements.filter { el in
+            var matches = true
+            if let q = textQuery, !q.isEmpty {
+                let lq = q.lowercased()
+                let labelHit = el.label.lowercased().contains(lq)
+                let valHit = el.value?.lowercased().contains(lq) ?? false
+                matches = matches && (labelHit || valHit)
+            }
+            if let r = roleFilter, !r.isEmpty {
+                matches = matches && el.role.lowercased().contains(r.lowercased())
+            }
+            return matches
+        }
+        return SnapshotResult(
+            snapshotId: snap.snapshotId,
+            timestamp: snap.timestamp,
+            activeApp: snap.activeApp,
+            activePid: snap.activePid,
+            windowID: snap.windowID,
+            windowTitle: snap.windowTitle,
+            screenBounds: snap.screenBounds,
+            scaleFactor: snap.scaleFactor,
+            axCount: filtered.filter { $0.source == .ax }.count,
+            ocrCount: filtered.filter { $0.source == .ocr }.count,
+            elements: filtered
+        )
+    }
+
+    /// Computes a compact, bounded post-action AX diff so the LLM immediately sees what changed
+    /// after a click/type/press/scroll without needing a separate full `snapshot` round-trip.
+    public func computePostActionDiff(preferredPid: Int32? = nil) -> String? {
+        guard AuditAndSecurityGuard.shared.loadConfig().autoPostActionDiff else {
+            return nil
+        }
+        let prevSnap = currentSnapshot()
+        let targetAppName: String? = {
+            if let pid = preferredPid, pid > 0,
+               let running = AppWorkspaceController.shared.listRunningApps().first(where: { $0.pid == pid }) {
+                return running.name
+            }
+            return prevSnap?.activeApp
+        }()
+        let axScan = AXScanner.shared.scanApplication(
+            appNameFilter: targetAppName,
+            preferredWindowID: prevSnap?.windowID,
+            maxDepth: 12,
+            maxElements: 120
+        )
+        guard axScan.pid > 0 else { return nil }
+
+        var parts: [String] = []
+        if let foc = axScan.elements.first(where: { $0.focused }) {
+            let valDesc = (foc.value != nil && !foc.value!.isEmpty) ? "='\(foc.value!.prefix(30))'" : ""
+            parts.append("focus:\(foc.ref)[\(foc.role):\(foc.label.prefix(24))\(valDesc)]")
+        }
+
+        if let prev = prevSnap, prev.activePid == axScan.pid {
+            let prevByLabelRole = Dictionary(
+                 prev.elements.map { ("\($0.role)|\($0.label)", $0.value ?? "") },
+                uniquingKeysWith: { first, _ in first }
+            )
+            var changed: [String] = []
+            var added: [String] = []
+            for el in axScan.elements {
+                let key = "\(el.role)|\(el.label)"
+                if let oldVal = prevByLabelRole[key] {
+                    let newVal = el.value ?? ""
+                    if oldVal != newVal && !newVal.isEmpty {
+                        changed.append("~\(el.ref)[\(el.label.prefix(18))]='\(newVal.prefix(24))'")
+                    }
+                } else {
+                    let cx = Int(el.centerPoint.x.rounded())
+                    let cy = Int(el.centerPoint.y.rounded())
+                    added.append("+\(el.ref)|\(el.role)|\(cx),\(cy)|\(el.label.prefix(24))")
+                }
+            }
+            if !changed.isEmpty {
+                parts.append("changed: " + changed.prefix(4).joined(separator: ", "))
+            }
+            if !added.isEmpty {
+                parts.append("added(\(added.count)): " + added.prefix(5).joined(separator: "; "))
+            }
+        }
+
+        // Preserve existing OCR elements if they belong to the same window so @e refs stay usable
+        let preservedOCR = (prevSnap?.activePid == axScan.pid) ? (prevSnap?.elements.filter { $0.source == .ocr } ?? []) : []
+        let merged = VisionOCRScanner.mergeElements(axElements: axScan.elements, ocrCandidates: preservedOCR)
+        let updatedSnap = SnapshotResult(
+            activeApp: axScan.appName,
+            activePid: axScan.pid,
+            windowID: axScan.windowID,
+            windowTitle: axScan.windowTitle,
+            screenBounds: axScan.windowFrame ?? prevSnap?.screenBounds ?? PermissionManager.shared.mainScreenBounds(),
+            scaleFactor: prevSnap?.scaleFactor ?? 2.0,
+            axCount: axScan.elements.count,
+            ocrCount: preservedOCR.count,
+            elements: merged
+        )
+        saveSnapshot(updatedSnap)
+
+        return parts.isEmpty ? nil : parts.joined(separator: " | ")
     }
 
     private func loadFromDiskIfNeeded() {

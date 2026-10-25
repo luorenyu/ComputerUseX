@@ -346,7 +346,32 @@ public final class MouseController: @unchecked Sendable {
         )
 
         try moveSmoothly(to: startPoint, duration: 0.14)
+        Thread.sleep(forTimeInterval: 0.05)
         KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: startPoint, button: .left, clickCount: 1))
+
+        // Background window title-bar drag fast-path: if dragging a background window's titlebar, move via kAXPositionAttribute!
+        if let rw = SyntheticFocusEnforcer.shared.resolveTargetWindow(at: startPoint, preferredPid: lastTargetPid),
+           !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: rw.windowID, pid: rw.pid),
+           startPoint.y >= rw.bounds.y && (startPoint.y - rw.bounds.y) <= 40.0 {
+            let deltaX = endPoint.x - startPoint.x
+            let deltaY = endPoint.y - startPoint.y
+            let newOrigin = ScreenPoint(x: rw.bounds.x + deltaX, y: rw.bounds.y + deltaY)
+            if AXScanner.shared.moveWindowBackground(pid: rw.pid, windowID: rw.windowID, to: newOrigin) {
+                try moveSmoothly(to: endPoint, duration: duration)
+                KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: endPoint, button: .left, clickCount: 1))
+                let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+                let desc = "(\(Int(startPoint.x)),\(Int(startPoint.y))) -> (\(Int(endPoint.x)),\(Int(endPoint.y)))"
+                return ActionOutcome(
+                    action: "drag",
+                    targetDescription: desc,
+                    point: endPoint,
+                    details: "method=ax-window-move, winID=\(rw.windowID)",
+                    elapsedMs: ms
+                )
+            }
+        }
+
+        let gestureEventNumber = Int64(CGEventSource.counterForEventType(.combinedSessionState, eventType: .leftMouseDown)) + 1
 
         guard let downEvent = CGEvent(
             mouseEventSource: nil,
@@ -360,23 +385,37 @@ public final class MouseController: @unchecked Sendable {
                 recoveryHint: "Verify Accessibility permission is enabled."
             )
         }
+        downEvent.setIntegerValueField(.mouseEventNumber, value: gestureEventNumber)
         downEvent.post(tap: .cghidEventTap)
-        Thread.sleep(forTimeInterval: 0.04)
+        KillSwitchMonitor.shared.recordAgentMousePosition(startPoint)
+        Thread.sleep(forTimeInterval: 0.06)
 
-        let points = CubicBezierTrajectory.sample(from: startPoint, to: endPoint, steps: 20, curvature: 0.06)
+        let points = CubicBezierTrajectory.sample(from: startPoint, to: endPoint, steps: 20, curvature: 0.04)
         let stepInterval = max(0.006, duration / Double(points.count))
 
+        var prevPt = startPoint
         for pt in points {
             try KillSwitchMonitor.shared.verifySafeToProceed()
+            let dx = pt.x - prevPt.x
+            let dy = pt.y - prevPt.y
             if let dragEvent = CGEvent(
                 mouseEventSource: nil,
                 mouseType: .leftMouseDragged,
                 mouseCursorPosition: pt.cgPoint,
                 mouseButton: .left
             ) {
+                dragEvent.setIntegerValueField(.mouseEventNumber, value: gestureEventNumber)
+                dragEvent.setIntegerValueField(.mouseEventDeltaX, value: Int64(dx.rounded()))
+                dragEvent.setIntegerValueField(.mouseEventDeltaY, value: Int64(dy.rounded()))
+                dragEvent.setDoubleValueField(.mouseEventDeltaX, value: dx)
+                dragEvent.setDoubleValueField(.mouseEventDeltaY, value: dy)
                 dragEvent.post(tap: .cghidEventTap)
                 KillSwitchMonitor.shared.recordAgentMousePosition(pt)
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorMove(point: pt, windowID: lastTargetWindowID, pid: lastTargetPid, tiltAngle: 0.0, label: nil)
+                )
             }
+            prevPt = pt
             Thread.sleep(forTimeInterval: stepInterval)
         }
 
@@ -386,6 +425,7 @@ public final class MouseController: @unchecked Sendable {
             mouseCursorPosition: endPoint.cgPoint,
             mouseButton: .left
         ) {
+            upEvent.setIntegerValueField(.mouseEventNumber, value: gestureEventNumber)
             upEvent.post(tap: .cghidEventTap)
         }
         KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: endPoint, button: .left, clickCount: 1))
@@ -397,6 +437,7 @@ public final class MouseController: @unchecked Sendable {
             action: "drag",
             targetDescription: desc,
             point: endPoint,
+            details: "method=hid-delta-drag",
             elapsedMs: ms
         )
     }

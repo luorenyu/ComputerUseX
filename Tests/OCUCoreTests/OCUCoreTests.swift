@@ -180,10 +180,31 @@ final class OCUCoreTests: XCTestCase {
             XCTFail("Invalid MCP tools/list response")
             return
         }
-        XCTAssertEqual(tools.count, 11)
+        XCTAssertEqual(tools.count, 14)
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_snapshot" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_query" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_upload_file" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_secondary_action" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_click" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_batch" }))
+    }
+
+    func testSecurityGuardBlocksSensitiveAppsAndRecordsAudit() {
+        XCTAssertThrowsError(try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: "1Password 8"))
+        XCTAssertThrowsError(try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: "钥匙串访问"))
+        XCTAssertNoThrow(try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: "微信"))
+
+        AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+            command: "test_click",
+            app: "微信",
+            target: "@e1",
+            success: true,
+            details: "unit test audit entry",
+            elapsedMs: 12
+        ))
+        let recent = AuditAndSecurityGuard.shared.recentAuditRecords(limit: 5)
+        XCTAssertFalse(recent.isEmpty)
+        XCTAssertEqual(recent.last?.command, "test_click")
     }
 
     func testSnapshotFormatCompactAndWindowOriginMapping() {

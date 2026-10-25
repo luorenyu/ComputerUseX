@@ -38,6 +38,7 @@ public final class AppWorkspaceController: @unchecked Sendable {
         identifierOrName: String,
         launchIfNeeded: Bool = true
     ) throws -> ActionOutcome {
+        try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: identifierOrName)
         let startTime = Date()
         let lower = identifierOrName.lowercased()
         let workspace = NSWorkspace.shared
@@ -208,6 +209,50 @@ public final class AppWorkspaceController: @unchecked Sendable {
             code: .timeout,
             message: "Timed out after \(timeoutSeconds)s waiting for text '\(query)' on screen.",
             recoveryHint: "Take an ocu_snapshot to inspect the current UI state."
+        )
+    }
+
+    /// Automates the macOS native File Picker (`NSOpenPanel` / `openAndSavePanelService`) in one command:
+    /// sends `Cmd+Shift+G` (Go to Folder), pastes the absolute file path, confirms the path selection, and confirms the Open dialog.
+    public func uploadFileInOpenPanel(filePath: String, appName: String? = nil) throws -> ActionOutcome {
+        let startTime = Date()
+        try KillSwitchMonitor.shared.verifySafeToProceed()
+        let expandedPath = (filePath as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expandedPath) else {
+            throw OCUError(
+                code: .invalidArguments,
+                message: "File to upload does not exist at path: \(expandedPath)",
+                recoveryHint: "Provide a valid absolute file path."
+            )
+        }
+
+        if let app = appName, !app.isEmpty {
+            _ = try? focusOrLaunchApp(identifierOrName: app, launchIfNeeded: false)
+            Thread.sleep(forTimeInterval: 0.15)
+        }
+
+        KillSwitchMonitor.shared.emitHUDEvent(
+            .statusPill(title: "📂 正在自动选择上传文件...", subtitle: (expandedPath as NSString).lastPathComponent)
+        )
+
+        // 1. Open "Go to Folder" sheet inside macOS NSOpenPanel via Cmd+Shift+G
+        _ = try KeyboardController.shared.pressShortcut("cmd+shift+g", virtualCursor: false)
+        Thread.sleep(forTimeInterval: 0.32)
+
+        // 2. Paste the absolute file path and press Return to navigate to and highlight the file
+        _ = try KeyboardController.shared.typeText(expandedPath, clearFirst: true, submit: true, virtualCursor: false)
+        Thread.sleep(forTimeInterval: 0.38)
+
+        // 3. Press Return again to confirm the Open dialog
+        _ = try KeyboardController.shared.pressShortcut("enter", virtualCursor: false)
+        Thread.sleep(forTimeInterval: 0.18)
+
+        let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+        return ActionOutcome(
+            action: "upload_file",
+            targetDescription: expandedPath,
+            details: "Selected and submitted via macOS NSOpenPanel Cmd+Shift+G",
+            elapsedMs: ms
         )
     }
 

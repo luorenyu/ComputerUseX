@@ -17,6 +17,7 @@ public struct UIElementRef: Codable, Equatable, Sendable {
     public var focused: Bool
     public var appName: String
     public var pid: Int32
+    public var windowID: UInt32?
     public var windowTitle: String?
     public var confidence: Double?
 
@@ -31,6 +32,7 @@ public struct UIElementRef: Codable, Equatable, Sendable {
         focused: Bool = false,
         appName: String,
         pid: Int32,
+        windowID: UInt32? = nil,
         windowTitle: String? = nil,
         confidence: Double? = nil
     ) {
@@ -45,6 +47,7 @@ public struct UIElementRef: Codable, Equatable, Sendable {
         self.focused = focused
         self.appName = appName
         self.pid = pid
+        self.windowID = windowID
         self.windowTitle = windowTitle
         self.confidence = confidence
     }

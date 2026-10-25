@@ -45,6 +45,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 let snap = try ElementSnapshotStore.shared.captureSnapshot(
                     appName: request.app,
                     preferredWindowID: request.windowID,
+                    windowTitleFilter: request.windowTitle,
                     focusFirst: request.focus ?? false,
                     windowOnly: request.windowOnly ?? true,
                     enableOCR: request.ocr ?? true,
@@ -52,10 +53,38 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     outputPath: request.outputPath,
                     includeBase64: request.som ?? false
                 )
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "snapshot",
+                    app: snap.activeApp,
+                    windowID: snap.windowID,
+                    success: true,
+                    details: "elements=\(snap.elements.count)",
+                    elapsedMs: 0
+                ))
+                return IPCResponse(id: request.id, ok: true, snapshot: snap)
+
+            case "query":
+                let snap = try ElementSnapshotStore.shared.queryElements(
+                    appName: request.app,
+                    preferredWindowID: request.windowID,
+                    windowTitleFilter: request.windowTitle,
+                    textQuery: request.text ?? request.target,
+                    roleFilter: request.role,
+                    enableOCR: request.ocr ?? false
+                )
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "query",
+                    app: snap.activeApp,
+                    windowID: snap.windowID,
+                    target: request.text ?? request.target,
+                    success: true,
+                    details: "matched=\(snap.elements.count)",
+                    elapsedMs: 0
+                ))
                 return IPCResponse(id: request.id, ok: true, snapshot: snap)
 
             case "click":
-                let outcome = try MouseController.shared.click(
+                var outcome = try MouseController.shared.click(
                     target: request.target,
                     x: request.x,
                     y: request.y,
@@ -66,6 +95,17 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     axNative: request.axNative ?? false,
                     virtualCursor: request.virtualCursor
                 )
+                if let diff = ElementSnapshotStore.shared.computePostActionDiff() {
+                    outcome.details = [outcome.details, diff].compactMap { $0 }.joined(separator: " | ")
+                }
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "click",
+                    target: outcome.targetDescription,
+                    point: outcome.point,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "move":
@@ -120,7 +160,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                         recoveryHint: "Provide the text string to type."
                     )
                 }
-                let outcome = try KeyboardController.shared.typeText(
+                var outcome = try KeyboardController.shared.typeText(
                     text,
                     target: request.target,
                     x: request.x,
@@ -131,6 +171,17 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     submit: request.submit ?? false,
                     virtualCursor: request.virtualCursor
                 )
+                if let diff = ElementSnapshotStore.shared.computePostActionDiff() {
+                    outcome.details = [outcome.details, diff].compactMap { $0 }.joined(separator: " | ")
+                }
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "type",
+                    target: outcome.targetDescription,
+                    point: outcome.point,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "batch":
@@ -196,17 +247,38 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                         recoveryHint: "Provide a key or shortcut like 'enter' or 'cmd+c'."
                     )
                 }
-                let outcome = try KeyboardController.shared.pressShortcut(keys, virtualCursor: request.virtualCursor)
+                var outcome = try KeyboardController.shared.pressShortcut(keys, virtualCursor: request.virtualCursor)
+                if let diff = ElementSnapshotStore.shared.computePostActionDiff() {
+                    outcome.details = [outcome.details, diff].compactMap { $0 }.joined(separator: " | ")
+                }
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "press",
+                    target: keys,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "scroll":
-                let outcome = try MouseController.shared.scroll(
+                var outcome = try MouseController.shared.scroll(
                     dx: request.dx ?? 0,
                     dy: request.dy ?? -240,
                     target: request.target,
                     x: request.x,
                     y: request.y
                 )
+                if let diff = ElementSnapshotStore.shared.computePostActionDiff() {
+                    outcome.details = [outcome.details, diff].compactMap { $0 }.joined(separator: " | ")
+                }
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "scroll",
+                    target: outcome.targetDescription,
+                    point: outcome.point,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "drag":
@@ -240,6 +312,83 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     from: startPt,
                     to: endPt,
                     duration: request.timeout ?? 0.30
+                )
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "drag",
+                    target: outcome.targetDescription,
+                    point: outcome.point,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "upload_file", "upload-file":
+                guard let path = request.outputPath ?? request.text ?? request.target, !path.isEmpty else {
+                    throw OCUError(
+                        code: .invalidArguments,
+                        message: "upload-file requires a file path (--path <file>).",
+                        recoveryHint: "Pass --path /absolute/path/to/file."
+                    )
+                }
+                let outcome = try AppWorkspaceController.shared.uploadFileInOpenPanel(
+                    filePath: path,
+                    appName: request.app
+                )
+                AuditAndSecurityGuard.shared.recordAudit(AuditRecord(
+                    command: "upload_file",
+                    app: request.app,
+                    target: path,
+                    success: true,
+                    details: outcome.details,
+                    elapsedMs: outcome.elapsedMs
+                ))
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "secondary_action", "secondary-action":
+                guard let targetRef = request.target, !targetRef.isEmpty else {
+                    throw OCUError(
+                        code: .invalidArguments,
+                        message: "secondary-action requires a target element (@e1).",
+                        recoveryHint: "Pass --target @e1 --action AXShowMenu."
+                    )
+                }
+                let el = try ElementSnapshotStore.shared.resolveTarget(targetRef)
+                let actionName = request.text ?? "AXShowMenu"
+                let ok = AXScanner.shared.performSecondaryAction(ref: el.ref, actionName: actionName)
+                guard ok else {
+                    throw OCUError(
+                        code: .actionFailed,
+                        message: "Secondary action '\(actionName)' failed on \(el.ref) [\(el.label)].",
+                        recoveryHint: "Try right-clicking via 'ocu click --target \(el.ref) --right'."
+                    )
+                }
+                let outcome = ActionOutcome(
+                    action: "secondary_action",
+                    targetDescription: "\(el.ref) [\(el.label)]",
+                    point: el.centerPoint,
+                    details: "action=\(actionName)",
+                    elapsedMs: 12
+                )
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "install_mcp", "install-mcp":
+                let outcome = try AuditAndSecurityGuard.shared.installMCPConfiguration(
+                    target: request.target ?? "all",
+                    binaryPath: request.outputPath
+                )
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "audit":
+                let records = AuditAndSecurityGuard.shared.recentAuditRecords(limit: request.clickCount ?? 20)
+                let lines = records.map { rec in
+                    "[\(rec.timestamp)] \(rec.command) | target=\(rec.target ?? rec.app ?? "-") | ok=\(rec.success) | \(rec.details ?? "") (\(rec.elapsedMs)ms)"
+                }
+                let outcome = ActionOutcome(
+                    action: "audit",
+                    targetDescription: "\(records.count) recent audit records (\(AuditAndSecurityGuard.shared.auditFileURL.path))",
+                    details: lines.joined(separator: "\n"),
+                    elapsedMs: 2
                 )
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 

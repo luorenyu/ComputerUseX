@@ -61,18 +61,70 @@ public final class AXScanner: @unchecked Sendable {
     }
 
     /// Sets `kAXValueAttribute` directly on an AX text field / search field in the background without stealing OS focus,
-    /// matching Codex's `ComputerUseAppController.setValue(elementID:value:autosubmitSearchFields:)`.
+    /// and performs read-back verification so silent no-ops (e.g. `<input type="date">` or custom React inputs)
+    /// return `false` and automatically trigger synthesized keyboard typing fallback.
     public func performNativeSetValue(ref: String, value: String, submit: Bool = false) -> Bool {
         guard let element = resolveLiveAXElement(for: ref) else {
             return false
         }
+        let beforeVal = copyValueAsString(element)?.trimmingCharacters(in: .whitespacesAndNewlines)
         _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let err = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFTypeRef)
         guard err == .success else { return false }
+
+        let expected = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        var verified = false
+        for _ in 0..<3 {
+            Thread.sleep(forTimeInterval: 0.03)
+            if let afterVal = copyValueAsString(element)?.trimmingCharacters(in: .whitespacesAndNewlines) {
+                if afterVal == expected || (afterVal != beforeVal && !afterVal.isEmpty) {
+                    verified = true
+                    break
+                }
+            }
+        }
+        guard verified else {
+            return false
+        }
         if submit {
             _ = AXUIElementPerformAction(element, kAXConfirmAction as CFString)
         }
         return true
+    }
+
+    /// Performs secondary AX actions (`AXShowMenu`, `AXIncrement`, `AXDecrement`, `AXPick`, `AXCancel`) on an element.
+    public func performSecondaryAction(ref: String, actionName: String = "AXShowMenu") -> Bool {
+        guard let element = resolveLiveAXElement(for: ref) else {
+            return false
+        }
+        let normalized: String
+        switch actionName.lowercased() {
+        case "menu", "showmenu", "axshowmenu", "contextmenu":
+            normalized = kAXShowMenuAction as String
+        case "increment", "axincrement", "up", "+":
+            normalized = kAXIncrementAction as String
+        case "decrement", "axdecrement", "down", "-":
+            normalized = kAXDecrementAction as String
+        case "cancel", "axcancel":
+            normalized = kAXCancelAction as String
+        case "pick", "axpick":
+            normalized = kAXPickAction as String
+        default:
+            normalized = actionName
+        }
+        return AXUIElementPerformAction(element, normalized as CFString) == .success
+    }
+
+    /// Moves a window directly in the background via `kAXPositionAttribute` without moving the physical mouse cursor.
+    public func moveWindowBackground(pid: Int32, windowID: UInt32?, to newOrigin: ScreenPoint) -> Bool {
+        let axApp = AXUIElementCreateApplication(pid)
+        let allWindows: [AXUIElement] = copyAttribute(axApp, kAXWindowsAttribute as String) ?? []
+        guard let targetWin = (windowID.flatMap { wid in allWindows.first(where: { cgWindowID(for: $0) == wid }) }) ?? allWindows.first else {
+            return false
+        }
+        var pt = CGPoint(x: newOrigin.x, y: newOrigin.y)
+        guard let axVal = AXValueCreate(.cgPoint, &pt) else { return false }
+        return AXUIElementSetAttributeValue(targetWin, kAXPositionAttribute as CFString, axVal) == .success
     }
 
     /// Unminimizes, raises (`kAXRaiseAction`), and activates the exact window matching `(pid, windowID)` when the user clicks the Mini PiP preview.
@@ -94,6 +146,7 @@ public final class AXScanner: @unchecked Sendable {
     public func scanApplication(
         appNameFilter: String? = nil,
         preferredWindowID: UInt32? = nil,
+        windowTitleFilter: String? = nil,
         maxDepth: Int = 16,
         maxElements: Int = 220
     ) -> (
@@ -154,7 +207,15 @@ public final class AXScanner: @unchecked Sendable {
 
         let targetWinID = preferredWindowID ?? SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: pid)
 
-        if let desiredWid = targetWinID {
+        if let titleFilter = windowTitleFilter, !titleFilter.isEmpty,
+           let matchedByTitle = (visibleWindows + allWindows).first(where: {
+               copyStringAttribute($0, kAXTitleAttribute as String)?.localizedCaseInsensitiveContains(titleFilter) == true
+           }) {
+            resolvedWindowID = cgWindowID(for: matchedByTitle)
+            windowTitle = copyStringAttribute(matchedByTitle, kAXTitleAttribute as String)
+            primaryWindowFrame = copyFrame(matchedByTitle)
+            roots.append(matchedByTitle)
+        } else if let desiredWid = targetWinID {
             if let matchedWin = allWindows.first(where: { cgWindowID(for: $0) == desiredWid }) {
                 resolvedWindowID = desiredWid
                 windowTitle = copyStringAttribute(matchedWin, kAXTitleAttribute as String)
@@ -206,6 +267,23 @@ public final class AXScanner: @unchecked Sendable {
 
         if let wid = resolvedWindowID, wid > 0 {
             SyntheticFocusEnforcer.shared.pinWindow(pid: pid, windowID: wid)
+        }
+
+        // Automatically detect modal AXSheets or out-of-process macOS File Picker (`openAndSavePanelService`)
+        // overlapping the target window so file upload dialogs in Chrome/Firefox/WeChat are visible in the AX tree!
+        for win in roots {
+            if let sheets: [AXUIElement] = copyAttribute(win, "AXSheets"), !sheets.isEmpty {
+                roots.insert(contentsOf: sheets, at: 0)
+            }
+        }
+        if let panelServiceApp = workspace.runningApplications.first(where: {
+            $0.bundleIdentifier == "com.apple.appkit.xpc.openAndSavePanelService"
+        }) {
+            let panelAX = AXUIElementCreateApplication(panelServiceApp.processIdentifier)
+            AXUIElementSetMessagingTimeout(panelAX, 0.5)
+            if let panelWins: [AXUIElement] = copyAttribute(panelAX, kAXWindowsAttribute as String), !panelWins.isEmpty {
+                roots.insert(contentsOf: panelWins, at: 0)
+            }
         }
 
         if roots.isEmpty {
@@ -286,6 +364,7 @@ public final class AXScanner: @unchecked Sendable {
                                 focused: focused,
                                 appName: appName,
                                 pid: pid,
+                                windowID: resolvedWindowID,
                                 windowTitle: windowTitle
                             )
                             collected.append((item, element))

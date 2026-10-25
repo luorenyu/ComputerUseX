@@ -114,6 +114,8 @@ public struct IPCRequest: Codable, Sendable {
     public var command: String
     public var app: String?
     public var windowID: UInt32?
+    public var windowTitle: String?
+    public var role: String?
     public var target: String?
     public var toTarget: String?
     public var x: Double?
@@ -148,6 +150,8 @@ public struct IPCRequest: Codable, Sendable {
         command: String,
         app: String? = nil,
         windowID: UInt32? = nil,
+        windowTitle: String? = nil,
+        role: String? = nil,
         target: String? = nil,
         toTarget: String? = nil,
         x: Double? = nil,
@@ -181,6 +185,8 @@ public struct IPCRequest: Codable, Sendable {
         self.command = command
         self.app = app
         self.windowID = windowID
+        self.windowTitle = windowTitle
+        self.role = role
         self.target = target
         self.toTarget = toTarget
         self.x = x
