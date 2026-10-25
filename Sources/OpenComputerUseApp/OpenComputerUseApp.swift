@@ -13,6 +13,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     @Published public var humanTakeoverGuard: Bool = true
     @Published public var virtualCursorMode: Bool = true
     @Published public var miniPiPPreviewMode: Bool = true
+    @Published public var interactiveAppConsent: Bool = AuditAndSecurityGuard.shared.loadConfig().interactiveAppConsent
 
     private let ipcServer = UnixSocketIPC()
     private var timer: Timer?
@@ -25,6 +26,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
         OverlayHUDWindowController.shared.setupOverlayWindow()
         VirtualCursorWindowController.shared.ensureWindowCreated()
         MiniPreviewWindowController.shared.ensureWindowCreated()
+        SessionBillWindowController.shared.ensureWindowCreated()
 
         KillSwitchMonitor.shared.setHUDHandler { event in
             OverlayHUDWindowController.shared.viewModel.handle(event)
@@ -132,6 +134,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
 struct OpenComputerUseMenuBarApp: App {
     @StateObject private var coordinator = DaemonAppCoordinator.shared
     @StateObject private var hudViewModel = OverlayHUDWindowController.shared.viewModel
+    @StateObject private var billViewModel = SessionBillWindowController.shared.viewModel
 
     init() {
         DispatchQueue.main.async {
@@ -153,6 +156,55 @@ struct OpenComputerUseMenuBarApp: App {
                         .font(.caption)
                         .foregroundColor(coordinator.ipcListening ? .green : .red)
                 }
+
+                Divider()
+
+                // Active Operator & Usage Bill Section
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Image(systemName: "person.badge.key.fill")
+                            .foregroundColor(.cyan)
+                            .font(.system(size: 11))
+                        Text(billViewModel.isSessionRunning ? "当前操作者 (运行中)" : "最近操作者 & 账单")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if billViewModel.isSessionRunning {
+                            Text("● LIVE")
+                                .font(.system(size: 9.5, weight: .bold, design: .monospaced))
+                                .foregroundColor(.green)
+                        }
+                    }
+
+                    HStack {
+                        Text("🤖 \(billViewModel.activeAgentName)")
+                            .font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        Text(billViewModel.activeModelName)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.secondary)
+                    }
+
+                    if let lastBill = billViewModel.currentBill {
+                        HStack {
+                            Text("⏱️ \(String(format: "%.1fs", lastBill.totalDurationSeconds)) (\(lastBill.actionCount)步)")
+                                .font(.system(size: 11, design: .monospaced))
+                            Spacer()
+                            Text("📊 \(lastBill.totalTokens) tok")
+                                .font(.system(size: 11, design: .monospaced))
+                            Spacer()
+                            Text(String(format: "💵 $%.5f", lastBill.costUSD))
+                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .foregroundColor(.green)
+                        }
+                        Button("🧾 弹出完整使用账单卡片 (#\(lastBill.billId))") {
+                            SessionBillWindowController.shared.presentCompletedBill(lastBill, autoHideSeconds: 12.0)
+                        }
+                        .font(.caption)
+                    }
+                }
+                .padding(8)
+                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
 
                 Divider()
 
@@ -240,6 +292,15 @@ struct OpenComputerUseMenuBarApp: App {
                     set: { val in
                         coordinator.humanTakeoverGuard = val
                         KillSwitchMonitor.shared.humanTakeoverEnabled = val
+                    }
+                ))
+                .font(.system(size: 12))
+
+                Toggle("首次操作未知 App 弹窗授权确认", isOn: Binding(
+                    get: { coordinator.interactiveAppConsent },
+                    set: { val in
+                        coordinator.interactiveAppConsent = val
+                        AuditAndSecurityGuard.shared.setInteractiveConsentEnabled(val)
                     }
                 ))
                 .font(.system(size: 12))

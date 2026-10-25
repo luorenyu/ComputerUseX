@@ -36,6 +36,10 @@ public final class MiniPreviewViewModel: ObservableObject, @unchecked Sendable {
     @Published public var cursorTiltDegrees: Double = 0.0
     @Published public var cursorBadge: String = "OCU"
     @Published public var statusText: String = "后台协作就绪"
+    @Published public var operatorAgentName: String = "Antigravity"
+    @Published public var operatorModelName: String = "Gemini 2.5 Pro"
+    @Published public var operatorStepCount: Int = 0
+    @Published public var operatorCostUSD: Double = 0.0
 
     // Scaled highlight rect in normalized window coordinates [0, 1]
     @Published public var highlightNormRect: CGRect? = nil
@@ -288,6 +292,20 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
         }
     }
 
+    public func updateOperatorTelemetry(
+        agentName: String,
+        modelName: String,
+        stepCount: Int,
+        costUSD: Double
+    ) {
+        DispatchQueue.main.async {
+            self.viewModel.operatorAgentName = agentName
+            self.viewModel.operatorModelName = modelName
+            self.viewModel.operatorStepCount = stepCount
+            self.viewModel.operatorCostUSD = costUSD
+        }
+    }
+
     /// Invoked when the user clicks the Mini PiP preview window:
     /// Unminimizes, raises (`kAXRaiseAction`), and activates the real target window to the foreground,
     /// and seamlessly transfers the virtual cursor to the real desktop window!
@@ -501,10 +519,34 @@ struct MiniPreviewRootView: View {
                     .position(x: cx, y: cy)
                 }
 
-                // 5. Minimalist Hover Control Overlay (Only appears when user hovers over the mini window)
-                if isHovering {
-                    HStack(spacing: 6) {
-                        Spacer()
+                // 5. Persistent Live Operator Badge (Top-Left) + Hover Control Overlay (Top-Right)
+                HStack(spacing: 6) {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(Color.cyan)
+                            .frame(width: 6, height: 6)
+                            .shadow(color: Color.cyan, radius: 3)
+                        Text("\(viewModel.operatorAgentName) · \(viewModel.operatorModelName)")
+                            .font(.system(size: 9.5, weight: .semibold))
+                            .foregroundColor(.white)
+                            .lineLimit(1)
+                        if viewModel.operatorCostUSD > 0 {
+                            Text(String(format: "$%.4f", viewModel.operatorCostUSD))
+                                .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                .foregroundColor(Color(red: 0.30, green: 0.98, blue: 0.72))
+                        }
+                    }
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3.5)
+                    .background(
+                        Capsule()
+                            .fill(Color.black.opacity(0.68))
+                            .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.45), lineWidth: 0.8))
+                    )
+
+                    Spacer()
+
+                    if isHovering {
                         Button(action: onSummonWindow) {
                             HStack(spacing: 3) {
                                 Image(systemName: "macwindow.on.rectangle")
@@ -528,9 +570,8 @@ struct MiniPreviewRootView: View {
                         }
                         .buttonStyle(.plain)
                     }
-                    .padding(8)
-                    .transition(.opacity)
                 }
+                .padding(7)
             }
             .contentShape(Rectangle())
             .onTapGesture {

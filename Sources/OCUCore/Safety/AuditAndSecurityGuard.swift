@@ -1,4 +1,5 @@
 import Foundation
+import AppKit
 
 public struct AuditRecord: Codable, Sendable {
     public var timestamp: String
@@ -39,6 +40,7 @@ public struct OCUSecurityConfig: Codable, Sendable {
     public var blockedApps: [String]
     public var auditLoggingEnabled: Bool
     public var autoPostActionDiff: Bool
+    public var interactiveAppConsent: Bool
 
     public static let defaultBlockedApps: [String] = [
         "1Password",
@@ -55,12 +57,14 @@ public struct OCUSecurityConfig: Codable, Sendable {
         allowedApps: [String] = [],
         blockedApps: [String] = Self.defaultBlockedApps,
         auditLoggingEnabled: Bool = true,
-        autoPostActionDiff: Bool = true
+        autoPostActionDiff: Bool = true,
+        interactiveAppConsent: Bool = false
     ) {
         self.allowedApps = allowedApps
         self.blockedApps = blockedApps
         self.auditLoggingEnabled = auditLoggingEnabled
         self.autoPostActionDiff = autoPostActionDiff
+        self.interactiveAppConsent = interactiveAppConsent
     }
 }
 
@@ -69,6 +73,8 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
 
     private let lock = NSLock()
     private var cachedConfig: OCUSecurityConfig?
+    private var sessionApprovedApps: Set<String> = []
+    private var sessionDeniedApps: Set<String> = []
 
     public var baseDirectory: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
@@ -131,6 +137,137 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
                 message: "Access to sensitive application '\(name)' is blocked by OpenComputerUse security guardrail.",
                 recoveryHint: "Add '\(name)' to 'allowedApps' in ~/.opencomputeruse/config.json if you explicitly want to automate it."
             )
+        }
+
+        // Per-App First-Time Interactive Consent Modal (when interactiveAppConsent is enabled)
+        if config.interactiveAppConsent {
+            lock.lock()
+            let alreadyApproved = sessionApprovedApps.contains(lowerName)
+            let alreadyDenied = sessionDeniedApps.contains(lowerName)
+            lock.unlock()
+
+            if alreadyDenied {
+                throw OCUError(
+                    code: .blockedApp,
+                    message: "User denied OpenComputerUse access to application '\(name)' for this session.",
+                    recoveryHint: "Run 'ocu allow-app \"\(name)\"' to grant access."
+                )
+            }
+
+            if !alreadyApproved {
+                let operatorIdentity = SessionBillingManager.shared.detectCurrentOperator()
+                let granted = promptInteractiveAppConsent(
+                    appName: name,
+                    agentName: operatorIdentity.agentName,
+                    modelName: operatorIdentity.modelName
+                )
+                if !granted {
+                    throw OCUError(
+                        code: .blockedApp,
+                        message: "User declined interactive permission to operate '\(name)'.",
+                        recoveryHint: "Approve the prompt or run 'ocu allow-app \"\(name)\"'."
+                    )
+                }
+            }
+        }
+    }
+
+    public func setInteractiveConsentEnabled(_ enabled: Bool) {
+        var cfg = loadConfig()
+        cfg.interactiveAppConsent = enabled
+        saveConfig(cfg)
+    }
+
+    public func saveConfig(_ config: OCUSecurityConfig) {
+        lock.lock()
+        cachedConfig = config
+        lock.unlock()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? encoder.encode(config) {
+            try? data.write(to: configFileURL, options: .atomic)
+        }
+    }
+
+    public func updateAppPermission(appName: String, allow: Bool) -> ActionOutcome {
+        var cfg = loadConfig()
+        let trimmed = appName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        lock.lock()
+        if allow {
+            sessionApprovedApps.insert(lower)
+            sessionDeniedApps.remove(lower)
+        } else {
+            sessionDeniedApps.insert(lower)
+            sessionApprovedApps.remove(lower)
+        }
+        lock.unlock()
+
+        if allow {
+            if !cfg.allowedApps.contains(where: { $0.lowercased() == lower }) {
+                cfg.allowedApps.append(trimmed)
+            }
+            cfg.blockedApps.removeAll(where: { $0.lowercased() == lower })
+        } else {
+            if !cfg.blockedApps.contains(where: { $0.lowercased() == lower }) {
+                cfg.blockedApps.append(trimmed)
+            }
+            cfg.allowedApps.removeAll(where: { $0.lowercased() == lower })
+        }
+        saveConfig(cfg)
+        return ActionOutcome(
+            action: allow ? "allow_app" : "block_app",
+            targetDescription: "\(allow ? "Allowed" : "Blocked") app '\(trimmed)' in security policy",
+            details: "Saved to \(configFileURL.path)",
+            elapsedMs: 2
+        )
+    }
+
+    /// Displays a native macOS modal authorization dialog on first access to an unapproved application.
+    public func promptInteractiveAppConsent(appName: String, agentName: String, modelName: String) -> Bool {
+        final class ConsentBox: @unchecked Sendable {
+            var responseCode: NSApplication.ModalResponse = .alertThirdButtonReturn
+        }
+        let box = ConsentBox()
+        let runModalBlock = {
+            let alert = NSAlert()
+            alert.alertStyle = .informational
+            alert.messageText = "🤖 \(agentName) 请求操控「\(appName)」"
+            alert.informativeText = """
+            当前操作者: \(agentName)
+            使用模型: \(modelName)
+            目标应用: \(appName)
+
+            是否允许该 Agent 通过 OpenComputerUse 扫描并操作「\(appName)」？
+            """
+            alert.addButton(withTitle: "允许并加入白名单 (Always Allow)")
+            alert.addButton(withTitle: "仅本次会话允许 (Allow Once)")
+            alert.addButton(withTitle: "拒绝拦截 (Deny)")
+            NSApp?.activate(ignoringOtherApps: true)
+            box.responseCode = alert.runModal()
+        }
+
+        if Thread.isMainThread {
+            runModalBlock()
+        } else {
+            DispatchQueue.main.sync(execute: runModalBlock)
+        }
+
+        let lower = appName.lowercased()
+        switch box.responseCode {
+        case .alertFirstButtonReturn:
+            _ = updateAppPermission(appName: appName, allow: true)
+            return true
+        case .alertSecondButtonReturn:
+            lock.lock()
+            sessionApprovedApps.insert(lower)
+            lock.unlock()
+            return true
+        default:
+            lock.lock()
+            sessionDeniedApps.insert(lower)
+            lock.unlock()
+            return false
         }
     }
 

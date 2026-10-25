@@ -16,6 +16,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
     @Published public var showBorderGlow: Bool = false
     @Published public var pillTitle: String? = nil
     @Published public var pillSubtitle: String? = nil
+    @Published public var operatorBadgeText: String = "🤖 Antigravity · Gemini 2.5 Pro"
     @Published public var trailPoints: [ScreenPoint] = []
     @Published public var highlightRect: ScreenRect? = nil
     @Published public var highlightLabel: String? = nil
@@ -154,6 +155,26 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
 
             case .virtualCursorHide:
                 VirtualCursorWindowController.shared.hideCursor()
+
+            case .operatorStatus(let agentName, let modelName, let currentAction, let actionCount, let totalTokens, let costUSD):
+                self.operatorBadgeText = "🤖 \(agentName) · \(modelName)"
+                MiniPreviewWindowController.shared.updateOperatorTelemetry(
+                    agentName: agentName,
+                    modelName: modelName,
+                    stepCount: actionCount,
+                    costUSD: costUSD
+                )
+                SessionBillWindowController.shared.updateLiveOperator(
+                    agentName: agentName,
+                    modelName: modelName,
+                    currentAction: currentAction,
+                    actionCount: actionCount,
+                    totalTokens: totalTokens,
+                    costUSD: costUSD
+                )
+
+            case .sessionBillCompleted(let bill):
+                SessionBillWindowController.shared.presentCompletedBill(bill)
 
             case .clear:
                 withAnimation(.easeOut(duration: 0.2)) {
@@ -297,6 +318,9 @@ struct OverlayHUDRootView: View {
                                 .shadow(color: .cyan, radius: 4)
 
                             VStack(alignment: .leading, spacing: 2) {
+                                Text(viewModel.operatorBadgeText)
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundColor(.cyan)
                                 Text(title)
                                     .font(.system(size: 13, weight: .semibold))
                                     .foregroundColor(.white)

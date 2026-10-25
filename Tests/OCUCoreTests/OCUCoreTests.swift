@@ -180,13 +180,69 @@ final class OCUCoreTests: XCTestCase {
             XCTFail("Invalid MCP tools/list response")
             return
         }
-        XCTAssertEqual(tools.count, 14)
+        XCTAssertEqual(tools.count, 17)
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_snapshot" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_query" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_upload_file" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_secondary_action" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_browser" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_sandbox" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_bill" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_click" }))
         XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_batch" }))
+    }
+
+    func testPerceptualImageDHashAndSessionBilling() {
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(
+            data: nil,
+            width: 64,
+            height: 64,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            XCTFail("Failed to create CGContext")
+            return
+        }
+        ctx.setFillColor(CGColor(red: 0.1, green: 0.2, blue: 0.3, alpha: 1.0))
+        ctx.fill(CGRect(x: 0, y: 0, width: 32, height: 64))
+        ctx.setFillColor(CGColor(red: 0.9, green: 0.8, blue: 0.7, alpha: 1.0))
+        ctx.fill(CGRect(x: 32, y: 0, width: 32, height: 64))
+        guard let img1 = ctx.makeImage(), let img2 = ctx.makeImage() else {
+            XCTFail("Failed to make test CGImages")
+            return
+        }
+
+        let hash1 = ImagePerceptualHasher.computeDHash(img1)
+        let hash2 = ImagePerceptualHasher.computeDHash(img2)
+        XCTAssertNotEqual(hash1, 0)
+        XCTAssertEqual(hash1, hash2)
+        XCTAssertTrue(ImagePerceptualHasher.areVisuallyEquivalent(hash1, hash2))
+
+        // Test SessionBillingManager operator detection & billing receipt
+        let op = SessionBillingManager.shared.detectCurrentOperator(
+            explicitAgent: "Antigravity",
+            explicitModel: "gemini-2.5-pro"
+        )
+        XCTAssertEqual(op.agentName, "Antigravity")
+        XCTAssertEqual(op.modelName, "gemini-2.5-pro")
+
+        let req = IPCRequest(command: "click", target: "@e1", agentName: "Antigravity", modelName: "gemini-2.5-pro")
+        let resp = IPCResponse(
+            id: req.id,
+            ok: true,
+            outcome: ActionOutcome(action: "click", targetDescription: "@e1 [发送]", details: "focus:@e1", elapsedMs: 180)
+        )
+        SessionBillingManager.shared.recordCommandUsage(request: req, response: resp, elapsedMs: 180)
+        let finalized = SessionBillingManager.shared.finalizeCurrentSessionIfActive()
+        XCTAssertNotNil(finalized)
+        XCTAssertEqual(finalized?.agentName, "Antigravity")
+        XCTAssertEqual(finalized?.modelName, "gemini-2.5-pro")
+        XCTAssertGreaterThan(finalized?.totalTokens ?? 0, 100)
+        XCTAssertGreaterThan(finalized?.costUSD ?? 0, 0.0)
+        XCTAssertTrue(finalized?.formatReceiptText().contains("OpenComputerUse 使用账单明细") == true)
     }
 
     func testSecurityGuardBlocksSensitiveAppsAndRecordsAudit() {

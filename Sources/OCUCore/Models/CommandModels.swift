@@ -47,6 +47,8 @@ public struct PermissionStatus: Codable, Equatable, Sendable {
     public var screenBounds: ScreenRect
     public var scaleFactor: Double
     public var killSwitchTripped: Bool
+    public var screenLocked: Bool?
+    public var activeOperator: AgentOperatorIdentity?
 
     public init(
         accessibilityGranted: Bool,
@@ -57,7 +59,9 @@ public struct PermissionStatus: Codable, Equatable, Sendable {
         mouseLocation: ScreenPoint,
         screenBounds: ScreenRect,
         scaleFactor: Double,
-        killSwitchTripped: Bool
+        killSwitchTripped: Bool,
+        screenLocked: Bool? = nil,
+        activeOperator: AgentOperatorIdentity? = nil
     ) {
         self.accessibilityGranted = accessibilityGranted
         self.screenRecordingGranted = screenRecordingGranted
@@ -68,6 +72,8 @@ public struct PermissionStatus: Codable, Equatable, Sendable {
         self.screenBounds = screenBounds
         self.scaleFactor = scaleFactor
         self.killSwitchTripped = killSwitchTripped
+        self.screenLocked = screenLocked
+        self.activeOperator = activeOperator
     }
 }
 
@@ -81,6 +87,8 @@ public enum HUDAnimationEvent: Codable, Equatable, Sendable {
     case virtualCursorPress(point: ScreenPoint, windowID: UInt32?, isPressed: Bool)
     case virtualCursorHide
     case pipTargetWindow(pid: Int32, windowID: UInt32, appName: String, windowTitle: String?, windowBounds: ScreenRect)
+    case operatorStatus(agentName: String, modelName: String, currentAction: String, actionCount: Int, totalTokens: Int, costUSD: Double)
+    case sessionBillCompleted(UsageSessionBill)
     case clear
 }
 
@@ -139,9 +147,12 @@ public struct IPCRequest: Codable, Sendable {
     public var focus: Bool?
     public var compact: Bool?
     public var windowOnly: Bool?
+    public var dedupImage: Bool?
     public var virtualCursor: Bool?
     public var timeout: Double?
     public var outputPath: String?
+    public var agentName: String?
+    public var modelName: String?
     public var hudEvent: HUDAnimationEvent?
     public var steps: [IPCRequest]?
 
@@ -175,9 +186,12 @@ public struct IPCRequest: Codable, Sendable {
         focus: Bool? = nil,
         compact: Bool? = nil,
         windowOnly: Bool? = nil,
+        dedupImage: Bool? = nil,
         virtualCursor: Bool? = nil,
         timeout: Double? = nil,
         outputPath: String? = nil,
+        agentName: String? = nil,
+        modelName: String? = nil,
         hudEvent: HUDAnimationEvent? = nil,
         steps: [IPCRequest]? = nil
     ) {
@@ -210,9 +224,12 @@ public struct IPCRequest: Codable, Sendable {
         self.focus = focus
         self.compact = compact
         self.windowOnly = windowOnly
+        self.dedupImage = dedupImage
         self.virtualCursor = virtualCursor
         self.timeout = timeout
         self.outputPath = outputPath
+        self.agentName = agentName
+        self.modelName = modelName
         self.hudEvent = hudEvent
         self.steps = steps
     }
@@ -226,6 +243,9 @@ public struct IPCResponse: Codable, Sendable {
     public var snapshot: SnapshotResult?
     public var outcome: ActionOutcome?
     public var batchOutcomes: [ActionOutcome]?
+    public var bill: UsageSessionBill?
+    public var bills: [UsageSessionBill]?
+    public var browserTabs: [BrowserTabInfo]?
     public var error: OCUError?
 
     public init(
@@ -236,6 +256,9 @@ public struct IPCResponse: Codable, Sendable {
         snapshot: SnapshotResult? = nil,
         outcome: ActionOutcome? = nil,
         batchOutcomes: [ActionOutcome]? = nil,
+        bill: UsageSessionBill? = nil,
+        bills: [UsageSessionBill]? = nil,
+        browserTabs: [BrowserTabInfo]? = nil,
         error: OCUError? = nil
     ) {
         self.id = id
@@ -245,6 +268,9 @@ public struct IPCResponse: Codable, Sendable {
         self.snapshot = snapshot
         self.outcome = outcome
         self.batchOutcomes = batchOutcomes
+        self.bill = bill
+        self.bills = bills
+        self.browserTabs = browserTabs
         self.error = error
     }
 }

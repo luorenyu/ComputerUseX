@@ -121,6 +121,9 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
     public var screenshotPath: String?
     public var annotatedScreenshotPath: String?
     public var imageBase64: String?
+    public var imageHash: String?
+    public var imageDeduplicated: Bool?
+    public var unchangedSinceSnapshotId: String?
 
     public init(
         snapshotId: String = UUID().uuidString.prefix(8).lowercased(),
@@ -136,7 +139,10 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         elements: [UIElementRef],
         screenshotPath: String? = nil,
         annotatedScreenshotPath: String? = nil,
-        imageBase64: String? = nil
+        imageBase64: String? = nil,
+        imageHash: String? = nil,
+        imageDeduplicated: Bool? = nil,
+        unchangedSinceSnapshotId: String? = nil
     ) {
         self.snapshotId = snapshotId
         self.timestamp = timestamp
@@ -152,6 +158,9 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         self.screenshotPath = screenshotPath
         self.annotatedScreenshotPath = annotatedScreenshotPath
         self.imageBase64 = imageBase64
+        self.imageHash = imageHash
+        self.imageDeduplicated = imageDeduplicated
+        self.unchangedSinceSnapshotId = unchangedSinceSnapshotId
     }
 
     /// Formats the snapshot in a token-compact tabular form (`@eX|src|role|x,y|label`), saving ~60% LLM context tokens.
@@ -161,7 +170,9 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         let boundsDesc = "[\(Int(b.x)),\(Int(b.y)) \(Int(b.width))x\(Int(b.height))]"
         let widTag = windowID != nil ? "#\(windowID!) " : ""
         lines.append("# snap:\(snapshotId) | app:\(activeApp)(\(activePid)) | win:\(widTag)\(windowTitle ?? "-") \(boundsDesc) | total:\(elements.count)(ax:\(axCount),ocr:\(ocrCount))")
-        if let som = annotatedScreenshotPath {
+        if imageDeduplicated == true, let prevId = unchangedSinceSnapshotId {
+            lines.append("# img_dedup: unchanged_since=\(prevId) (dHash=\(imageHash ?? "-"), base64 omitted to save tokens)")
+        } else if let som = annotatedScreenshotPath {
             lines.append("# som:\(som)")
         } else if let raw = screenshotPath {
             lines.append("# img:\(raw)")

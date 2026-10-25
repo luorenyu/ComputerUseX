@@ -248,9 +248,18 @@ public final class UnixSocketIPC: @unchecked Sendable {
     /// or executes in-process (inheriting host Terminal/IDE TCC permissions) while
     /// streaming all visual HUD events live to OpenComputerUse.app!
     public static func executeRoutingThroughDaemonIfAvailable(
-        _ request: IPCRequest,
+        _ rawRequest: IPCRequest,
         preferDaemon: Bool = true
     ) -> IPCResponse {
+        var request = rawRequest
+        if request.command != "hud_event" && (request.agentName == nil || request.modelName == nil) {
+            let detected = SessionBillingManager.shared.detectCurrentOperator(
+                explicitAgent: request.agentName,
+                explicitModel: request.modelName
+            )
+            if request.agentName == nil { request.agentName = detected.agentName }
+            if request.modelName == nil { request.modelName = detected.modelName }
+        }
         let daemonOnline = isDaemonReachable()
 
         if preferDaemon && daemonOnline {

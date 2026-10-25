@@ -42,6 +42,10 @@ public final class MCPServer: @unchecked Sendable {
         switch method {
         case "initialize":
             let clientProtocol = params["protocolVersion"] as? String ?? "2024-11-05"
+            if let clientInfo = params["clientInfo"] as? [String: Any],
+               let clientName = clientInfo["name"] as? String {
+                SessionBillingManager.shared.registerMCPClient(name: clientName)
+            }
             return makeResultResponse(id: id, result: [
                 "protocolVersion": clientProtocol,
                 "capabilities": [
@@ -131,6 +135,8 @@ public final class MCPServer: @unchecked Sendable {
                   let data = try? encoder.encode(apps),
                   let str = String(data: data, encoding: .utf8) {
             contentBlocks.append(["type": "text", "text": str])
+        } else if let bill = resp.bill {
+            contentBlocks.append(["type": "text", "text": bill.formatReceiptText()])
         } else if let outcome = resp.outcome,
                   let data = try? encoder.encode(outcome),
                   let str = String(data: data, encoding: .utf8) {
@@ -171,7 +177,34 @@ public final class MCPServer: @unchecked Sendable {
                 focus: arguments["focus"] as? Bool ?? false,
                 compact: arguments["compact"] as? Bool ?? true,
                 windowOnly: arguments["window_only"] as? Bool ?? true,
-                outputPath: arguments["output"] as? String
+                dedupImage: arguments["dedup_image"] as? Bool ?? true,
+                outputPath: arguments["output"] as? String,
+                agentName: arguments["agent"] as? String,
+                modelName: arguments["model"] as? String
+            )
+        case "ocu_browser":
+            return IPCRequest(
+                command: "browser",
+                app: arguments["browser"] as? String,
+                windowTitle: arguments["tab_filter"] as? String,
+                role: arguments["action"] as? String ?? "tabs",
+                target: arguments["selector"] as? String,
+                text: (arguments["url"] as? String) ?? (arguments["js"] as? String) ?? (arguments["selector"] as? String),
+                launch: arguments["new_tab"] as? Bool ?? false
+            )
+        case "ocu_sandbox":
+            return IPCRequest(
+                command: "sandbox",
+                app: arguments["app"] as? String,
+                role: arguments["action"] as? String ?? "status"
+            )
+        case "ocu_bill":
+            return IPCRequest(
+                command: "bill",
+                submit: arguments["finish"] as? Bool ?? false,
+                focus: arguments["show_popup"] as? Bool ?? true,
+                agentName: arguments["agent"] as? String,
+                modelName: arguments["model"] as? String
             )
         case "ocu_query":
             let winID = intVal(arguments["window_id"]).map { UInt32($0) }
@@ -513,6 +546,46 @@ public final class MCPServer: @unchecked Sendable {
                     "properties": [
                         "text": ["type": "string", "description": "Optional text to wait for on screen"],
                         "timeout": ["type": "number", "description": "Timeout or delay in seconds (default: 3.0)"]
+                    ]
+                ]
+            ],
+            [
+                "name": "ocu_browser",
+                "description": "Zero-focus background browser DOM/JS bridge for Google Chrome, Arc, Edge, Brave, and Safari. List open tabs, navigate URLs, evaluate JavaScript, extract DOM elements, or click CSS selectors without activating the browser window.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "action": ["type": "string", "enum": ["tabs", "navigate", "eval", "click", "dom"], "description": "Browser operation (default: tabs)"],
+                        "browser": ["type": "string", "description": "Optional browser name ('Google Chrome', 'Safari', 'Arc', 'Microsoft Edge')"],
+                        "url": ["type": "string", "description": "URL for 'navigate' action"],
+                        "js": ["type": "string", "description": "JavaScript code for 'eval' action"],
+                        "selector": ["type": "string", "description": "CSS selector or button text for 'click' action"],
+                        "tab_filter": ["type": "string", "description": "Optional tab title or URL substring to target a specific background tab"],
+                        "new_tab": ["type": "boolean", "description": "Open URL in a new background tab (default: false)"]
+                    ]
+                ]
+            ],
+            [
+                "name": "ocu_sandbox",
+                "description": "Manage the Ghost Space peripheral window sandbox ('park' moves a target app window out of the user's central workspace while keeping its GPU surface live for PiP; 'restore' returns it to its original frame; 'status' checks screen lock and parked windows).",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "action": ["type": "string", "enum": ["status", "park", "restore"], "description": "Sandbox action (default: status)"],
+                        "app": ["type": "string", "description": "Application name to park or restore"]
+                    ]
+                ]
+            ],
+            [
+                "name": "ocu_bill",
+                "description": "View or finalize the current ComputerUse session usage bill (shows Operator Agent, Model, Duration, Input/Output/Vision/Saved Tokens, and Cost in USD) and optionally pop up the visual receipt card on screen.",
+                "inputSchema": [
+                    "type": "object",
+                    "properties": [
+                        "finish": ["type": "boolean", "description": "Finalize and close the current session bill immediately (default: false)"],
+                        "show_popup": ["type": "boolean", "description": "Display the visual receipt card on the user's screen (default: true)"],
+                        "agent": ["type": "string", "description": "Optional override for operator Agent name"],
+                        "model": ["type": "string", "description": "Optional override for LLM Model name"]
                     ]
                 ]
             ]

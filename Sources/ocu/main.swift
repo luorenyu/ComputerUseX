@@ -83,9 +83,10 @@ struct OCUCLI {
         var boolFlags: Set<String> = []
 
         let knownBoolFlags: Set<String> = [
-            "compact", "som", "no-ocr", "full-screen",
+            "compact", "som", "no-ocr", "full-screen", "dedup-image", "no-dedup-image",
             "right", "middle", "double", "ax-native",
-            "virtual", "physical", "submit", "enter", "clear", "no-launch"
+            "virtual", "physical", "submit", "enter", "clear", "no-launch",
+            "finish", "show", "new-tab"
         ]
 
         var i = 0
@@ -159,6 +160,7 @@ struct OCUCLI {
             let focusFirst = boolFlags.contains("focus") || (flags["focus"] == "true")
             let compact = boolFlags.contains("compact") || (flags["compact"] == "true")
             let windowOnly = !boolFlags.contains("full-screen")
+            let dedupImg = !boolFlags.contains("no-dedup-image")
             let winID = UInt32(flags["window-id"] ?? flags["window"] ?? "")
             return IPCRequest(
                 command: "snapshot",
@@ -170,7 +172,10 @@ struct OCUCLI {
                 focus: focusFirst,
                 compact: compact,
                 windowOnly: windowOnly,
-                outputPath: flags["output"] ?? flags["out"]
+                dedupImage: dedupImg,
+                outputPath: flags["output"] ?? flags["out"],
+                agentName: flags["agent"],
+                modelName: flags["model"]
             )
 
         case "query", "find":
@@ -217,6 +222,58 @@ struct OCUCLI {
             let limit = Int(flags["limit"] ?? positional.first ?? "20") ?? 20
             return IPCRequest(
                 command: "audit",
+                clickCount: limit
+            )
+
+        case "allow-app":
+            return IPCRequest(
+                command: "allow_app",
+                app: flags["app"] ?? positional.first
+            )
+
+        case "block-app":
+            return IPCRequest(
+                command: "block_app",
+                app: flags["app"] ?? positional.first
+            )
+
+        case "browser":
+            let subAction = flags["action"] ?? positional.first ?? "tabs"
+            let argVal = flags["url"] ?? flags["eval"] ?? flags["js"] ?? flags["selector"] ?? (positional.count > 1 ? positional.dropFirst().joined(separator: " ") : nil)
+            return IPCRequest(
+                command: "browser",
+                app: flags["app"] ?? flags["browser"],
+                windowTitle: flags["tab"] ?? flags["window-title"],
+                role: subAction,
+                target: flags["selector"] ?? argVal,
+                text: argVal,
+                launch: boolFlags.contains("new-tab"),
+                agentName: flags["agent"],
+                modelName: flags["model"]
+            )
+
+        case "sandbox":
+            let subAction = flags["action"] ?? positional.first ?? "status"
+            let appTarget = flags["app"] ?? (positional.count > 1 ? positional[1] : nil)
+            return IPCRequest(
+                command: "sandbox",
+                app: appTarget,
+                role: subAction
+            )
+
+        case "bill":
+            return IPCRequest(
+                command: "bill",
+                submit: boolFlags.contains("finish") || (positional.first == "finish"),
+                focus: boolFlags.contains("show") || !boolFlags.contains("no-show"),
+                agentName: flags["agent"],
+                modelName: flags["model"]
+            )
+
+        case "bills":
+            let limit = Int(flags["limit"] ?? positional.first ?? "10") ?? 10
+            return IPCRequest(
+                command: "bills",
                 clickCount: limit
             )
 
@@ -375,8 +432,27 @@ struct OCUCLI {
             print("║ Active Application       : \(st.activeApp ?? "None")")
             print("║ Screen Logical Bounds    : \(Int(st.screenBounds.width))×\(Int(st.screenBounds.height)) @\(Int(st.scaleFactor))x")
             print("║ Current Mouse Position   : (\(Int(st.mouseLocation.x)), \(Int(st.mouseLocation.y)))")
+            if let op = st.activeOperator {
+                print("║ Current Operator Agent   : 🤖 \(op.agentName) [\(op.modelName)]")
+            }
+            if let locked = st.screenLocked {
+                print("║ Screen Lock State        : \(locked ? "🔒 Locked" : "🔓 Unlocked (Active Session)")")
+            }
             print("║ Kill Switch (Opt+Esc)    : \(st.killSwitchTripped ? "🛑 Tripped (Run 'ocu reset')" : "🟢 Armed & Safe")")
             print("╚══════════════════════════════════════════════════════════════╝")
+        }
+
+        if let bills = resp.bills, !bills.isEmpty {
+            print("🧾 Recent OpenComputerUse Session Bills (\(bills.count)):")
+            for b in bills {
+                print(" • [#\(b.billId)] \(b.endTime) | 🤖 \(b.agentName) (\(b.modelName)) | ⏱️ \(String(format: "%.1fs", b.totalDurationSeconds)) (\(b.actionCount) steps) | 📊 \(b.totalTokens) tok (省 \(b.savedTokens) tok) | 💵 $\(String(format: "%.5f", b.costUSD))")
+            }
+            if let latest = resp.bill {
+                print("")
+                print(latest.formatReceiptText())
+            }
+        } else if let bill = resp.bill {
+            print(bill.formatReceiptText())
         }
 
         if let apps = resp.apps {
@@ -492,6 +568,13 @@ struct OCUCLI {
           upload-file <path> [--app <name>]   Select and submit a file path in a macOS Open/Save File Dialog
           secondary-action <@eX> [--action <AXShowMenu|AXIncrement|AXDecrement>]
                                               Invoke native AX secondary actions on an element
+          browser <tabs|navigate|eval|click|dom> [arg] [--app <browser>]
+                                              Zero-focus background browser DOM/JS/Tab bridge
+          sandbox <status|park|restore> [<app>]
+                                              Park/restore background windows in Ghost Space sandbox
+          bill [--finish] [--show]            View or finalize current session bill (Agent, Model, Time, Tokens, $ USD)
+          bills [--limit <N>]                 List historical ComputerUse usage bills
+          allow-app <app> / block-app <app>   Manage per-app security allowlist & blocklist
           batch "<cmd1>" "<cmd2>" [...]       Execute multiple actions sequentially in one atomic round-trip
           press <shortcut>                    Press key or combo (e.g. 'enter', 'cmd+c', 'cmd+shift+p')
           scroll --dy <pixels> [--dx <pixels>] [--target <@eX>]

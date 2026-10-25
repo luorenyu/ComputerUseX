@@ -7,6 +7,9 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var latestSnapshot: SnapshotResult?
+    private var lastImageHash: UInt64 = 0
+    private var lastImageSnapshotId: String? = nil
+    private var lastImagePid: Int32 = 0
 
     public var cacheDirectory: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
@@ -31,6 +34,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         windowOnly: Bool = true,
         enableOCR: Bool = true,
         enableSoM: Bool = false,
+        dedupImage: Bool = true,
         outputPath: String? = nil,
         includeBase64: Bool = false
     ) throws -> SnapshotResult {
@@ -48,11 +52,19 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         )
 
         // 1. Scan Accessibility Tree
-        let axScan = AXScanner.shared.scanApplication(
+        var axScan = AXScanner.shared.scanApplication(
             appNameFilter: appName,
             preferredWindowID: preferredWindowID,
             windowTitleFilter: windowTitleFilter
         )
+        if axScan.pid > 0 && axScan.windowFrame == nil {
+            VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid)
+            axScan = AXScanner.shared.scanApplication(
+                appNameFilter: appName,
+                preferredWindowID: preferredWindowID,
+                windowTitleFilter: windowTitleFilter
+            )
+        }
         try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: axScan.appName)
         var axElements = axScan.elements
         if windowOnly, let winRect = axScan.windowFrame {
@@ -133,12 +145,33 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
         let allElements = axElements + ocrElements
 
-        // 4. Generate Set-of-Marks (SoM) annotated screenshot if requested
+        // 4. Generate Set-of-Marks (SoM) annotated screenshot if requested + Perceptual Image Deduplication (dHash)
         var rawPath: String? = nil
         var annotatedPath: String? = nil
         var base64String: String? = nil
+        var computedHashHex: String? = nil
+        var isDeduplicated: Bool = false
+        var unchangedSinceId: String? = nil
+        let newSnapshotId = String(UUID().uuidString.prefix(8)).lowercased()
 
         if let img = capturedImage {
+            let dHash = ImagePerceptualHasher.computeDHash(img)
+            computedHashHex = ImagePerceptualHasher.formatHex(dHash)
+
+            lock.lock()
+            let prevHash = lastImageHash
+            let prevId = lastImageSnapshotId
+            let prevPid = lastImagePid
+            if dedupImage && prevPid == axScan.pid && prevId != nil && ImagePerceptualHasher.areVisuallyEquivalent(dHash, prevHash) {
+                isDeduplicated = true
+                unchangedSinceId = prevId
+            } else {
+                lastImageHash = dHash
+                lastImageSnapshotId = newSnapshotId
+                lastImagePid = axScan.pid
+            }
+            lock.unlock()
+
             if enableSoM {
                 if let annotated = SoMAnnotator.shared.annotateImage(
                     img,
@@ -149,22 +182,26 @@ public final class ElementSnapshotStore: @unchecked Sendable {
                     let targetOut = outputPath ?? cacheDirectory.appendingPathComponent("latest_som.png").path
                     try? ScreenCaptureService.shared.savePNG(annotated, to: targetOut)
                     annotatedPath = targetOut
-                    if includeBase64, let pngData = ScreenCaptureService.shared.encodePNGData(annotated) {
+                    if includeBase64 && !isDeduplicated,
+                       let pngData = ScreenCaptureService.shared.encodePNGData(annotated) {
                         base64String = pngData.base64EncodedString()
                     }
                 }
             } else if let customOut = outputPath {
                 try? ScreenCaptureService.shared.savePNG(img, to: customOut)
                 rawPath = customOut
-                if includeBase64, let pngData = ScreenCaptureService.shared.encodePNGData(img) {
+                if includeBase64 && !isDeduplicated,
+                   let pngData = ScreenCaptureService.shared.encodePNGData(img) {
                     base64String = pngData.base64EncodedString()
                 }
-            } else if includeBase64, let pngData = ScreenCaptureService.shared.encodePNGData(img) {
+            } else if includeBase64 && !isDeduplicated,
+                      let pngData = ScreenCaptureService.shared.encodePNGData(img) {
                 base64String = pngData.base64EncodedString()
             }
         }
 
         let snapshot = SnapshotResult(
+            snapshotId: newSnapshotId,
             activeApp: axScan.appName,
             activePid: axScan.pid,
             windowID: axScan.windowID,
@@ -176,7 +213,10 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             elements: allElements,
             screenshotPath: rawPath,
             annotatedScreenshotPath: annotatedPath,
-            imageBase64: base64String
+            imageBase64: base64String,
+            imageHash: computedHashHex,
+            imageDeduplicated: isDeduplicated ? true : nil,
+            unchangedSinceSnapshotId: unchangedSinceId
         )
 
         saveSnapshot(snapshot)

@@ -6,12 +6,31 @@ public final class OCUCommandExecutor: @unchecked Sendable {
     private init() {}
 
     public func execute(_ request: IPCRequest, isDaemonContext: Bool = false) -> IPCResponse {
+        let startTime = Date()
+        let response = executeCore(request, isDaemonContext: isDaemonContext)
+        let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000)
+        if response.ok {
+            SessionBillingManager.shared.recordCommandUsage(
+                request: request,
+                response: response,
+                elapsedMs: elapsedMs
+            )
+        }
+        return response
+    }
+
+    private func executeCore(_ request: IPCRequest, isDaemonContext: Bool = false) -> IPCResponse {
         do {
             switch request.command {
             case "status":
-                let status = PermissionManager.shared.currentStatus(
+                var status = PermissionManager.shared.currentStatus(
                     daemonConnected: isDaemonContext || UnixSocketIPC.isDaemonReachable(),
                     socketPath: UnixSocketIPC.defaultSocketPath
+                )
+                status.screenLocked = VirtualDisplayManager.shared.isScreenLocked()
+                status.activeOperator = SessionBillingManager.shared.detectCurrentOperator(
+                    explicitAgent: request.agentName,
+                    explicitModel: request.modelName
                 )
                 return IPCResponse(id: request.id, ok: true, status: status)
 
@@ -50,6 +69,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     windowOnly: request.windowOnly ?? true,
                     enableOCR: request.ocr ?? true,
                     enableSoM: request.som ?? false,
+                    dedupImage: request.dedupImage ?? true,
                     outputPath: request.outputPath,
                     includeBase64: request.som ?? false
                 )
@@ -391,6 +411,131 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     elapsedMs: 2
                 )
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "allow_app", "allow-app":
+                guard let appName = request.app ?? request.target ?? request.text, !appName.isEmpty else {
+                    throw OCUError(
+                        code: .invalidArguments,
+                        message: "allow-app requires an application name.",
+                        recoveryHint: "Pass --app <AppName>."
+                    )
+                }
+                let outcome = AuditAndSecurityGuard.shared.updateAppPermission(appName: appName, allow: true)
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "block_app", "block-app":
+                guard let appName = request.app ?? request.target ?? request.text, !appName.isEmpty else {
+                    throw OCUError(
+                        code: .invalidArguments,
+                        message: "block-app requires an application name.",
+                        recoveryHint: "Pass --app <AppName>."
+                    )
+                }
+                let outcome = AuditAndSecurityGuard.shared.updateAppPermission(appName: appName, allow: false)
+                return IPCResponse(id: request.id, ok: true, outcome: outcome)
+
+            case "browser":
+                let subAction = (request.role ?? "tabs").lowercased()
+                switch subAction {
+                case "tabs", "list":
+                    let tabs = try BrowserBridgeController.shared.listTabs(browser: request.app)
+                    let summaryLines = tabs.map { t in
+                        "\(t.isActive ? "★" : " ") [Win \(t.windowIndex) Tab \(t.tabIndex)] \(t.title) — \(t.url)"
+                    }
+                    let out = ActionOutcome(
+                        action: "browser_tabs",
+                        targetDescription: "\(tabs.count) open tab(s) in \(BrowserBridgeController.shared.resolveBrowserAppName(preferred: request.app))",
+                        details: summaryLines.joined(separator: "\n"),
+                        elapsedMs: 15
+                    )
+                    return IPCResponse(id: request.id, ok: true, outcome: out, browserTabs: tabs)
+                case "navigate", "open":
+                    guard let url = request.text ?? request.target, !url.isEmpty else {
+                        throw OCUError(code: .invalidArguments, message: "browser navigate requires a URL.", recoveryHint: "Pass --url https://example.com")
+                    }
+                    let out = try BrowserBridgeController.shared.navigateURL(url, browser: request.app, newTab: request.launch ?? false)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                case "eval", "js":
+                    guard let js = request.text ?? request.target, !js.isEmpty else {
+                        throw OCUError(code: .invalidArguments, message: "browser eval requires JavaScript code.", recoveryHint: "Pass --eval 'document.title'")
+                    }
+                    let out = try BrowserBridgeController.shared.evaluateJavaScript(js, browser: request.app, tabFilter: request.windowTitle)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                case "click":
+                    guard let sel = request.target ?? request.text, !sel.isEmpty else {
+                        throw OCUError(code: .invalidArguments, message: "browser click requires a CSS selector or text.", recoveryHint: "Pass --selector 'button.submit'")
+                    }
+                    let out = try BrowserBridgeController.shared.clickDOMSelector(sel, browser: request.app, tabFilter: request.windowTitle)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                case "dom", "snapshot":
+                    let out = try BrowserBridgeController.shared.extractDOMSummary(browser: request.app, tabFilter: request.windowTitle)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                default:
+                    let tabs = try BrowserBridgeController.shared.listTabs(browser: request.app)
+                    return IPCResponse(id: request.id, ok: true, browserTabs: tabs)
+                }
+
+            case "sandbox":
+                let mode = (request.role ?? "status").lowercased()
+                if mode == "park", let appName = request.app ?? request.target, !appName.isEmpty {
+                    let out = try VirtualDisplayManager.shared.parkWindowInGhostSandbox(appName: appName)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                } else if mode == "restore" {
+                    let out = VirtualDisplayManager.shared.restoreParkedWindows(appName: request.app ?? request.target)
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                } else {
+                    let locked = VirtualDisplayManager.shared.isScreenLocked()
+                    let cgVirt = VirtualDisplayManager.shared.isCGVirtualDisplayRuntimeAvailable()
+                    let parked = VirtualDisplayManager.shared.currentParkedWindows()
+                    let out = ActionOutcome(
+                        action: "sandbox_status",
+                        targetDescription: "ScreenLocked=\(locked) | CGVirtualDisplayAvailable=\(cgVirt) | ParkedWindows=\(parked.count)",
+                        details: parked.map { "\($0.appName) (#\($0.windowID))" }.joined(separator: ", "),
+                        elapsedMs: 1
+                    )
+                    return IPCResponse(id: request.id, ok: true, outcome: out)
+                }
+
+            case "bill", "bills", "session_finish":
+                if request.submit == true || request.command == "session_finish" {
+                    if let finalized = SessionBillingManager.shared.finalizeCurrentSessionIfActive() {
+                        return IPCResponse(id: request.id, ok: true, bill: finalized)
+                    }
+                }
+                if request.command == "bills" {
+                    let recent = SessionBillingManager.shared.recentBills(limit: request.clickCount ?? 10)
+                    return IPCResponse(id: request.id, ok: true, bill: recent.last, bills: recent)
+                }
+                if let current = SessionBillingManager.shared.currentOrLatestBill() {
+                    if request.focus == true {
+                        KillSwitchMonitor.shared.emitHUDEvent(.sessionBillCompleted(current))
+                    }
+                    return IPCResponse(id: request.id, ok: true, bill: current)
+                } else {
+                    let op = SessionBillingManager.shared.detectCurrentOperator(
+                        explicitAgent: request.agentName,
+                        explicitModel: request.modelName
+                    )
+                    let emptyBill = UsageSessionBill(
+                        startTime: ISO8601DateFormatter().string(from: Date()),
+                        endTime: ISO8601DateFormatter().string(from: Date()),
+                        agentName: op.agentName,
+                        modelName: op.modelName,
+                        targetApps: [],
+                        actionCount: 0,
+                        totalDurationSeconds: 0.0,
+                        activeExecutionMs: 0,
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        visionTokens: 0,
+                        totalTokens: 0,
+                        savedTokens: 0,
+                        costUSD: 0.0,
+                        savedCostUSD: 0.0,
+                        steps: []
+                    )
+                    return IPCResponse(id: request.id, ok: true, bill: emptyBill)
+                }
 
             case "wait":
                 let outcome = try AppWorkspaceController.shared.waitForCondition(
