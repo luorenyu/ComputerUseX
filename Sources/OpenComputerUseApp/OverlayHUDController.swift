@@ -83,6 +83,25 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
                 self.scheduleAutoFade()
 
+            case .virtualCursorMove(let point, let windowID, let pid, let tiltAngle, let label):
+                VirtualCursorWindowController.shared.moveCursor(
+                    to: point,
+                    windowID: windowID,
+                    pid: pid,
+                    tiltAngle: tiltAngle,
+                    label: label
+                )
+
+            case .virtualCursorPress(let point, let windowID, let isPressed):
+                VirtualCursorWindowController.shared.setPressed(
+                    isPressed,
+                    at: point,
+                    windowID: windowID
+                )
+
+            case .virtualCursorHide:
+                VirtualCursorWindowController.shared.hideCursor()
+
             case .clear:
                 withAnimation(.easeOut(duration: 0.2)) {
                     self.showBorderGlow = false

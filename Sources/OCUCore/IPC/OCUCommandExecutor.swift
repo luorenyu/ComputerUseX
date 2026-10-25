@@ -62,7 +62,8 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     dy: request.dy,
                     button: request.button ?? .left,
                     clickCount: request.clickCount ?? 1,
-                    axNative: request.axNative ?? false
+                    axNative: request.axNative ?? false,
+                    virtualCursor: request.virtualCursor
                 )
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
@@ -72,9 +73,13 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 let desc: String
                 let offsetX = request.dx ?? 0
                 let offsetY = request.dy ?? 0
+                var targetPid: Int32? = nil
+                var badgeLabel: String? = nil
                 if let targetRef = request.target, !targetRef.isEmpty {
                     let el = try ElementSnapshotStore.shared.resolveTarget(targetRef)
                     destination = ScreenPoint(x: el.centerPoint.x + offsetX, y: el.centerPoint.y + offsetY)
+                    targetPid = el.pid
+                    badgeLabel = el.ref
                     if abs(offsetX) > 0.1 || abs(offsetY) > 0.1 {
                         desc = "\(el.ref) [\(el.label)] + offset(\(Int(offsetX)),\(Int(offsetY)))"
                     } else {
@@ -92,7 +97,12 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     )
                 }
                 KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🧭 移动指针至 \(desc)", subtitle: nil))
-                try MouseController.shared.moveSmoothly(to: destination)
+                try MouseController.shared.moveSmoothly(
+                    to: destination,
+                    virtualCursor: request.virtualCursor,
+                    pid: targetPid,
+                    label: badgeLabel
+                )
                 let outcome = ActionOutcome(
                     action: "move",
                     targetDescription: desc,
@@ -117,7 +127,8 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     dx: request.dx,
                     dy: request.dy,
                     clearFirst: request.clearFirst ?? false,
-                    submit: request.submit ?? false
+                    submit: request.submit ?? false,
+                    virtualCursor: request.virtualCursor
                 )
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
@@ -132,7 +143,10 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 let batchStart = Date()
                 var outcomes: [ActionOutcome] = []
                 var lastSnapshot: SnapshotResult? = nil
-                for (idx, step) in steps.enumerated() {
+                for (idx, var step) in steps.enumerated() {
+                    if step.virtualCursor == nil {
+                        step.virtualCursor = request.virtualCursor
+                    }
                     let stepResp = execute(step, isDaemonContext: isDaemonContext)
                     if !stepResp.ok {
                         return IPCResponse(
@@ -181,7 +195,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                         recoveryHint: "Provide a key or shortcut like 'enter' or 'cmd+c'."
                     )
                 }
-                let outcome = try KeyboardController.shared.pressShortcut(keys)
+                let outcome = try KeyboardController.shared.pressShortcut(keys, virtualCursor: request.virtualCursor)
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "scroll":

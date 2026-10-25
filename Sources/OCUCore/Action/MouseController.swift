@@ -5,12 +5,96 @@ import AppKit
 public final class MouseController: @unchecked Sendable {
     public static let shared = MouseController()
 
+    /// When enabled (default), OCU uses its own independent persistent Virtual Cursor window and
+    /// `SyntheticFocusEnforcer` (`CGEventPostToPid`) instead of hijacking the user's physical mouse.
+    public var useVirtualCursorByDefault: Bool = true
+
+    private let stateLock = NSLock()
+    private var virtualCursorLocation: ScreenPoint? = nil
+    private var lastTargetPid: Int32? = nil
+    private var lastTargetWindowID: UInt32? = nil
+    private var lastTargetWindowBounds: ScreenRect? = nil
+
     private init() {}
+
+    public var currentVirtualOrPhysicalLocation: ScreenPoint {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return virtualCursorLocation ?? PermissionManager.shared.currentMouseLocation()
+    }
+
+    public var lastResolvedTargetContext: (pid: Int32, windowID: UInt32, bounds: ScreenRect)? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        if let pid = lastTargetPid, let wid = lastTargetWindowID, let b = lastTargetWindowBounds {
+            return (pid, wid, b)
+        }
+        return nil
+    }
 
     public func moveSmoothly(
         to destination: ScreenPoint,
-        duration: TimeInterval = 0.18
+        duration: TimeInterval = 0.18,
+        virtualCursor: Bool? = nil,
+        windowID: UInt32? = nil,
+        pid: Int32? = nil,
+        label: String? = nil
     ) throws {
+        let isVirtual = virtualCursor ?? useVirtualCursorByDefault
+        if isVirtual {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+            let start = currentVirtualOrPhysicalLocation
+            let resolvedWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(at: destination, preferredPid: pid)
+            let effWinID = windowID ?? resolvedWin?.windowID
+            let effPid = pid ?? resolvedWin?.pid
+            let distance = start.distance(to: destination)
+
+            stateLock.lock()
+            if let rw = resolvedWin {
+                lastTargetPid = rw.pid
+                lastTargetWindowID = rw.windowID
+                lastTargetWindowBounds = rw.bounds
+            }
+            stateLock.unlock()
+
+            if distance < 2.0 {
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorMove(point: destination, windowID: effWinID, pid: effPid, tiltAngle: 0.0, label: label)
+                )
+                stateLock.lock()
+                virtualCursorLocation = destination
+                stateLock.unlock()
+                return
+            }
+
+            let steps = max(6, min(22, Int(distance / 42.0) + 6))
+            let points = CubicBezierTrajectory.sample(from: start, to: destination, steps: steps)
+            let stepInterval = max(0.005, duration / Double(points.count))
+
+            KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
+            KillSwitchMonitor.shared.emitHUDEvent(.pointerTrail(points: [start] + points))
+
+            var prev = start
+            for pt in points {
+                try KillSwitchMonitor.shared.verifySafeToProceed()
+                let vx = pt.x - prev.x
+                let tilt = max(-18.0, min(18.0, vx * 0.45))
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorMove(point: pt, windowID: effWinID, pid: effPid, tiltAngle: tilt, label: label)
+                )
+                prev = pt
+                Thread.sleep(forTimeInterval: stepInterval)
+            }
+
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .virtualCursorMove(point: destination, windowID: effWinID, pid: effPid, tiltAngle: 0.0, label: label)
+            )
+            stateLock.lock()
+            virtualCursorLocation = destination
+            stateLock.unlock()
+            return
+        }
+
         KillSwitchMonitor.shared.clearAgentMouseTracking()
         try KillSwitchMonitor.shared.verifySafeToProceed()
         let start = PermissionManager.shared.currentMouseLocation()
@@ -45,10 +129,16 @@ public final class MouseController: @unchecked Sendable {
         dy: Double? = nil,
         button: MouseButton = .left,
         clickCount: Int = 1,
-        axNative: Bool = false
+        axNative: Bool = false,
+        virtualCursor: Bool? = nil
     ) throws -> ActionOutcome {
         let startTime = Date()
-        try KillSwitchMonitor.shared.verifySafeToProceed()
+        let isVirtual = virtualCursor ?? useVirtualCursorByDefault
+        if isVirtual {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        } else {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        }
 
         var resolvedElement: UIElementRef? = nil
         let targetPoint: ScreenPoint
@@ -71,7 +161,7 @@ public final class MouseController: @unchecked Sendable {
             targetPoint = ScreenPoint(x: px + offsetX, y: py + offsetY)
             targetDesc = "(\(Int(targetPoint.x)), \(Int(targetPoint.y)))"
         } else {
-            let current = PermissionManager.shared.currentMouseLocation()
+            let current = isVirtual ? currentVirtualOrPhysicalLocation : PermissionManager.shared.currentMouseLocation()
             targetPoint = ScreenPoint(x: current.x + offsetX, y: current.y + offsetY)
             targetDesc = "current (\(Int(targetPoint.x)), \(Int(targetPoint.y)))"
         }
@@ -82,9 +172,23 @@ public final class MouseController: @unchecked Sendable {
             )
         }
 
+        let winContext = SyntheticFocusEnforcer.shared.resolveTargetWindow(
+            at: targetPoint,
+            preferredPid: resolvedElement?.pid,
+            preferredAppName: resolvedElement?.appName
+        )
+        if let wc = winContext {
+            stateLock.lock()
+            lastTargetPid = wc.pid
+            lastTargetWindowID = wc.windowID
+            lastTargetWindowBounds = wc.bounds
+            stateLock.unlock()
+        }
+
+        let badgeLabel = resolvedElement?.ref ?? "OCU"
         KillSwitchMonitor.shared.emitHUDEvent(
             .statusPill(
-                title: "🖱️ 点击 \(targetDesc)",
+                title: "🖱️ \(isVirtual ? "[虚拟指针]" : "") 点击 \(targetDesc)",
                 subtitle: "\(button.rawValue) ×\(clickCount)"
             )
         )
@@ -92,6 +196,16 @@ public final class MouseController: @unchecked Sendable {
         // Optional silent AXPress mode if requested, no relative offset is applied, and element supports it
         if axNative && !hasOffset, let el = resolvedElement, button == .left, clickCount == 1 {
             if AXScanner.shared.performNativePress(ref: el.ref) {
+                if isVirtual {
+                    try moveSmoothly(
+                        to: targetPoint,
+                        duration: 0.14,
+                        virtualCursor: true,
+                        windowID: winContext?.windowID,
+                        pid: winContext?.pid,
+                        label: badgeLabel
+                    )
+                }
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .clickRipple(point: targetPoint, button: button, clickCount: clickCount)
                 )
@@ -107,10 +221,51 @@ public final class MouseController: @unchecked Sendable {
             }
         }
 
-        try moveSmoothly(to: targetPoint)
+        try moveSmoothly(
+            to: targetPoint,
+            virtualCursor: isVirtual,
+            windowID: winContext?.windowID,
+            pid: winContext?.pid,
+            label: badgeLabel
+        )
         KillSwitchMonitor.shared.emitHUDEvent(
             .clickRipple(point: targetPoint, button: button, clickCount: clickCount)
         )
+
+        if isVirtual, let wc = winContext {
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: true)
+            )
+            // If element is AX and has no offset, also try native AXPress alongside or before synthesized click
+            var handledByAX = false
+            if !hasOffset, let el = resolvedElement, el.source == .ax, button == .left, clickCount == 1 {
+                handledByAX = AXScanner.shared.performNativePress(ref: el.ref)
+            }
+            if !handledByAX {
+                SyntheticFocusEnforcer.shared.performBackgroundClick(
+                    at: targetPoint,
+                    button: button,
+                    clickCount: clickCount,
+                    pid: wc.pid,
+                    windowID: wc.windowID,
+                    windowBounds: wc.bounds
+                )
+            }
+            DispatchQueue.global().asyncAfter(deadline: .now() + 0.14) {
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: false)
+                )
+            }
+            let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+            KillSwitchMonitor.shared.logAction("🖱️ [Virtual] Clicked \(targetDesc) -> PID \(wc.pid) Win #\(wc.windowID)")
+            return ActionOutcome(
+                action: "click(virtual)",
+                targetDescription: targetDesc,
+                point: targetPoint,
+                details: "mode=virtual, pid=\(wc.pid), windowID=\(wc.windowID), button=\(button.rawValue), count=\(clickCount)",
+                elapsedMs: ms
+            )
+        }
 
         let cgPoint = targetPoint.cgPoint
         let (downType, upType, cgButton) = mouseEventTypes(for: button)

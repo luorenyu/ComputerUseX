@@ -165,6 +165,7 @@ struct OCUCLI {
                 btn = .left
             }
             let count = Int(flags["count"] ?? "") ?? (boolFlags.contains("double") ? 2 : 1)
+            let isVirtual: Bool? = boolFlags.contains("physical") ? false : (boolFlags.contains("virtual") ? true : nil)
             return IPCRequest(
                 command: "click",
                 target: flags["target"] ?? positional.first,
@@ -174,17 +175,20 @@ struct OCUCLI {
                 dy: Double(flags["dy"] ?? flags["offset-y"] ?? ""),
                 button: btn,
                 clickCount: count,
-                axNative: boolFlags.contains("ax-native")
+                axNative: boolFlags.contains("ax-native"),
+                virtualCursor: isVirtual
             )
 
         case "move":
+            let isVirtual: Bool? = boolFlags.contains("physical") ? false : (boolFlags.contains("virtual") ? true : nil)
             return IPCRequest(
                 command: "move",
                 target: flags["target"] ?? positional.first,
                 x: Double(flags["x"] ?? ""),
                 y: Double(flags["y"] ?? ""),
                 dx: Double(flags["dx"] ?? flags["offset-x"] ?? ""),
-                dy: Double(flags["dy"] ?? flags["offset-y"] ?? "")
+                dy: Double(flags["dy"] ?? flags["offset-y"] ?? ""),
+                virtualCursor: isVirtual
             )
 
         case "type":
@@ -200,6 +204,7 @@ struct OCUCLI {
                 targetRef = nil
                 textVal = flags["text"] ?? positional.joined(separator: " ")
             }
+            let isVirtual: Bool? = boolFlags.contains("physical") ? false : (boolFlags.contains("virtual") ? true : nil)
             return IPCRequest(
                 command: "type",
                 target: targetRef,
@@ -209,7 +214,8 @@ struct OCUCLI {
                 dy: Double(flags["dy"] ?? flags["offset-y"] ?? ""),
                 text: textVal,
                 submit: boolFlags.contains("submit") || boolFlags.contains("enter"),
-                clearFirst: boolFlags.contains("clear")
+                clearFirst: boolFlags.contains("clear"),
+                virtualCursor: isVirtual
             )
 
         case "batch":
@@ -220,9 +226,11 @@ struct OCUCLI {
                 let subReq = parseSubcommand(command: subCmd, args: Array(words.dropFirst()))
                 stepReqs.append(subReq)
             }
+            let isVirtual: Bool? = boolFlags.contains("physical") ? false : (boolFlags.contains("virtual") ? true : nil)
             return IPCRequest(
                 command: "batch",
                 compact: boolFlags.contains("compact"),
+                virtualCursor: isVirtual,
                 steps: stepReqs
             )
 

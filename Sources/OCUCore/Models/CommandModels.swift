@@ -77,6 +77,9 @@ public enum HUDAnimationEvent: Codable, Equatable, Sendable {
     case pointerTrail(points: [ScreenPoint])
     case highlightElement(rect: ScreenRect, label: String?)
     case clickRipple(point: ScreenPoint, button: MouseButton, clickCount: Int)
+    case virtualCursorMove(point: ScreenPoint, windowID: UInt32?, pid: Int32?, tiltAngle: Double, label: String?)
+    case virtualCursorPress(point: ScreenPoint, windowID: UInt32?, isPressed: Bool)
+    case virtualCursorHide
     case clear
 }
 
@@ -132,6 +135,7 @@ public struct IPCRequest: Codable, Sendable {
     public var focus: Bool?
     public var compact: Bool?
     public var windowOnly: Bool?
+    public var virtualCursor: Bool?
     public var timeout: Double?
     public var outputPath: String?
     public var hudEvent: HUDAnimationEvent?
@@ -164,6 +168,7 @@ public struct IPCRequest: Codable, Sendable {
         focus: Bool? = nil,
         compact: Bool? = nil,
         windowOnly: Bool? = nil,
+        virtualCursor: Bool? = nil,
         timeout: Double? = nil,
         outputPath: String? = nil,
         hudEvent: HUDAnimationEvent? = nil,
@@ -195,6 +200,7 @@ public struct IPCRequest: Codable, Sendable {
         self.focus = focus
         self.compact = compact
         self.windowOnly = windowOnly
+        self.virtualCursor = virtualCursor
         self.timeout = timeout
         self.outputPath = outputPath
         self.hudEvent = hudEvent

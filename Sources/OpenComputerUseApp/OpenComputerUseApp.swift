@@ -11,6 +11,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     @Published public var ipcListening: Bool = false
     @Published public var killSwitchTripped: Bool = false
     @Published public var humanTakeoverGuard: Bool = true
+    @Published public var virtualCursorMode: Bool = true
 
     private let ipcServer = UnixSocketIPC()
     private var timer: Timer?
@@ -21,6 +22,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
 
     public func startServices() {
         OverlayHUDWindowController.shared.setupOverlayWindow()
+        VirtualCursorWindowController.shared.ensureWindowCreated()
 
         KillSwitchMonitor.shared.setHUDHandler { event in
             OverlayHUDWindowController.shared.viewModel.handle(event)
@@ -204,6 +206,18 @@ struct OpenComputerUseMenuBarApp: App {
                 Divider()
 
                 // Controls & Safety
+                Toggle("开启独立虚拟鼠标 (Codex 后台模式)", isOn: Binding(
+                    get: { coordinator.virtualCursorMode },
+                    set: { val in
+                        coordinator.virtualCursorMode = val
+                        MouseController.shared.useVirtualCursorByDefault = val
+                        if !val {
+                            VirtualCursorWindowController.shared.hideCursor()
+                        }
+                    }
+                ))
+                .font(.system(size: 12))
+
                 Toggle("开启全屏流光与鼠标轨迹 HUD", isOn: $hudViewModel.isHUDEnabled)
                     .font(.system(size: 12))
 

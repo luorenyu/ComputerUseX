@@ -75,16 +75,22 @@ public final class KeyboardController: @unchecked Sendable {
         return (flags, code)
     }
 
-    public func pressShortcut(_ combo: String) throws -> ActionOutcome {
+    public func pressShortcut(_ combo: String, virtualCursor: Bool? = nil) throws -> ActionOutcome {
         let startTime = Date()
-        try KillSwitchMonitor.shared.verifySafeToProceed()
+        let isVirtual = virtualCursor ?? MouseController.shared.useVirtualCursorByDefault
+        if isVirtual {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        } else {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        }
         let (flags, keyCode) = try Self.parseShortcut(combo)
 
         KillSwitchMonitor.shared.emitHUDEvent(
             .statusPill(title: "⌨️ 按键 \(combo)", subtitle: nil)
         )
 
-        postKeyCode(keyCode, flags: flags)
+        let targetPid = resolveTargetPid(forVirtualMode: isVirtual)
+        postKeyCode(keyCode, flags: flags, targetPid: targetPid)
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
         KillSwitchMonitor.shared.logAction("⌨️ Pressed \(combo)")
         return ActionOutcome(
@@ -102,10 +108,16 @@ public final class KeyboardController: @unchecked Sendable {
         dx: Double? = nil,
         dy: Double? = nil,
         clearFirst: Bool = false,
-        submit: Bool = false
+        submit: Bool = false,
+        virtualCursor: Bool? = nil
     ) throws -> ActionOutcome {
         let startTime = Date()
-        try KillSwitchMonitor.shared.verifySafeToProceed()
+        let isVirtual = virtualCursor ?? MouseController.shared.useVirtualCursorByDefault
+        if isVirtual {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        } else {
+            try KillSwitchMonitor.shared.verifySafeToProceed()
+        }
 
         var clickedPoint: ScreenPoint? = nil
         var targetDesc = target ?? "focused field"
@@ -117,11 +129,22 @@ public final class KeyboardController: @unchecked Sendable {
                 dx: dx,
                 dy: dy,
                 button: .left,
-                clickCount: 1
+                clickCount: 1,
+                virtualCursor: isVirtual
             )
             clickedPoint = clickRes.point
             targetDesc = clickRes.targetDescription
             Thread.sleep(forTimeInterval: 0.08)
+        }
+
+        let targetPid = resolveTargetPid(forVirtualMode: isVirtual)
+        if isVirtual, let ctx = MouseController.shared.lastResolvedTargetContext {
+            SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
+                pid: ctx.pid,
+                windowID: ctx.windowID,
+                windowBounds: ctx.bounds,
+                activationPoint: clickedPoint ?? ctx.bounds.center
+            )
         }
 
         let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
@@ -131,18 +154,18 @@ public final class KeyboardController: @unchecked Sendable {
 
         if clearFirst {
             // Cmd + A then Backspace
-            postKeyCode(0, flags: .maskCommand)
+            postKeyCode(0, flags: .maskCommand, targetPid: targetPid)
             Thread.sleep(forTimeInterval: 0.03)
-            postKeyCode(51, flags: [])
+            postKeyCode(51, flags: [], targetPid: targetPid)
             Thread.sleep(forTimeInterval: 0.03)
         }
 
         // Safe clipboard transaction for reliable Chinese/Emoji/multi-character injection
-        injectTextViaSafePasteboardOrUnicode(text)
+        injectTextViaSafePasteboardOrUnicode(text, targetPid: targetPid)
 
         if submit {
             Thread.sleep(forTimeInterval: 0.05)
-            postKeyCode(36, flags: []) // Return key
+            postKeyCode(36, flags: [], targetPid: targetPid) // Return key
         }
 
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -151,12 +174,24 @@ public final class KeyboardController: @unchecked Sendable {
             action: "type",
             targetDescription: targetDesc,
             point: clickedPoint,
-            details: "length=\(text.count), submit=\(submit)",
+            details: "length=\(text.count), submit=\(submit), mode=\(isVirtual ? "virtual" : "physical")",
             elapsedMs: ms
         )
     }
 
-    private func injectTextViaSafePasteboardOrUnicode(_ text: String) {
+    private func resolveTargetPid(forVirtualMode isVirtual: Bool) -> Int32? {
+        guard isVirtual else { return nil }
+        let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
+        if let ctxPid = MouseController.shared.lastResolvedTargetContext?.pid, ctxPid != frontPid {
+            return ctxPid
+        }
+        if let snapPid = ElementSnapshotStore.shared.currentSnapshot()?.activePid, snapPid != frontPid {
+            return snapPid
+        }
+        return nil
+    }
+
+    private func injectTextViaSafePasteboardOrUnicode(_ text: String, targetPid: Int32?) {
         let pasteboard = NSPasteboard.general
         let previousString = pasteboard.string(forType: .string)
 
@@ -164,7 +199,7 @@ public final class KeyboardController: @unchecked Sendable {
         if pasteboard.setString(text, forType: .string) {
             Thread.sleep(forTimeInterval: 0.02)
             // Post Cmd+V (keyCode 9 = 'v')
-            postKeyCode(9, flags: .maskCommand)
+            postKeyCode(9, flags: .maskCommand, targetPid: targetPid)
             Thread.sleep(forTimeInterval: 0.09)
 
             // Restore user's original clipboard content
@@ -179,13 +214,22 @@ public final class KeyboardController: @unchecked Sendable {
                let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                 down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
                 up.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
-                down.post(tap: .cghidEventTap)
-                up.post(tap: .cghidEventTap)
+                if let pid = targetPid {
+                    down.postToPid(pid)
+                    up.postToPid(pid)
+                } else {
+                    down.post(tap: .cghidEventTap)
+                    up.post(tap: .cghidEventTap)
+                }
             }
         }
     }
 
-    private func postKeyCode(_ keyCode: CGKeyCode, flags: CGEventFlags) {
+    private func postKeyCode(_ keyCode: CGKeyCode, flags: CGEventFlags, targetPid: Int32? = nil) {
+        if let pid = targetPid {
+            SyntheticFocusEnforcer.shared.postSynthesizedKeyCode(keyCode, flags: flags, toPid: pid)
+            return
+        }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) else {
             return
