@@ -80,6 +80,7 @@ public enum HUDAnimationEvent: Codable, Equatable, Sendable {
     case virtualCursorMove(point: ScreenPoint, windowID: UInt32?, pid: Int32?, tiltAngle: Double, label: String?)
     case virtualCursorPress(point: ScreenPoint, windowID: UInt32?, isPressed: Bool)
     case virtualCursorHide
+    case pipTargetWindow(pid: Int32, windowID: UInt32, appName: String, windowTitle: String?, windowBounds: ScreenRect)
     case clear
 }
 
@@ -112,6 +113,7 @@ public struct IPCRequest: Codable, Sendable {
     public var id: String
     public var command: String
     public var app: String?
+    public var windowID: UInt32?
     public var target: String?
     public var toTarget: String?
     public var x: Double?
@@ -145,6 +147,7 @@ public struct IPCRequest: Codable, Sendable {
         id: String = UUID().uuidString,
         command: String,
         app: String? = nil,
+        windowID: UInt32? = nil,
         target: String? = nil,
         toTarget: String? = nil,
         x: Double? = nil,
@@ -177,6 +180,7 @@ public struct IPCRequest: Codable, Sendable {
         self.id = id
         self.command = command
         self.app = app
+        self.windowID = windowID
         self.target = target
         self.toTarget = toTarget
         self.x = x

@@ -159,9 +159,11 @@ struct OCUCLI {
             let focusFirst = boolFlags.contains("focus") || (flags["focus"] == "true")
             let compact = boolFlags.contains("compact") || (flags["compact"] == "true")
             let windowOnly = !boolFlags.contains("full-screen")
+            let winID = UInt32(flags["window-id"] ?? flags["window"] ?? "")
             return IPCRequest(
                 command: "snapshot",
                 app: flags["app"] ?? positional.first,
+                windowID: winID,
                 ocr: enableOCR,
                 som: enableSoM,
                 focus: focusFirst,

@@ -15,6 +15,7 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
     private let lock = NSLock()
     private var eventCounter: Int64 = 1000
     private var activeStates: [Int32: Bool] = [:]
+    private var pinnedWindowsByPid: [Int32: UInt32] = [:]
     private let setWindowLocationFn: CGEventSetWindowLocationFn?
 
     private init() {
@@ -23,6 +24,19 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         } else {
             self.setWindowLocationFn = nil
         }
+    }
+
+    public func pinWindow(pid: Int32, windowID: UInt32) {
+        guard pid > 0, windowID > 0 else { return }
+        lock.lock()
+        pinnedWindowsByPid[pid] = windowID
+        lock.unlock()
+    }
+
+    public func pinnedWindowID(forPid pid: Int32) -> UInt32? {
+        lock.lock()
+        defer { lock.unlock() }
+        return pinnedWindowsByPid[pid]
     }
 
     public func nextEventNumber() -> Int64 {
@@ -74,6 +88,11 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 return (ownerPid, winNum, rect, ownerName)
             }
 
+            if let pPid = preferredPid,
+               let pinnedWid = pinnedWindowID(forPid: pPid),
+               let pinnedMatch = candidates.first(where: { $0.windowID == pinnedWid }) {
+                return pinnedMatch
+            }
             if let containing = candidates.first(where: { $0.bounds.contains(point) }) {
                 return containing
             }
@@ -135,6 +154,48 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             if rect.contains(point) {
                 return ownerPid == pid
             }
+        }
+        return false
+    }
+
+    /// Returns true only if `windowID` is currently the active frontmost unoccluded window on its display.
+    /// When false, the target window is in the background or occluded, so cursor feedback should be shown inside
+    /// the Mini PiP Live Preview Window instead of cluttering the user's main desktop.
+    public func isWindowFrontmostOnScreen(windowID: UInt32, pid: Int32) -> Bool {
+        guard windowID > 0 else { return false }
+        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
+            return false
+        }
+        guard let onScreenList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        let selfPid = ProcessInfo.processInfo.processIdentifier
+        for dict in onScreenList {
+            guard let ownerPid = dict[kCGWindowOwnerPID as String] as? Int32,
+                  ownerPid != selfPid,
+                  let layer = dict[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let winNum = dict[kCGWindowNumber as String] as? UInt32,
+                  let boundsDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
+                continue
+            }
+            let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
+            if ownerName.lowercased().contains("opencomputeruse") { continue }
+            let w = Double(boundsDict["Width"] ?? 0)
+            let h = Double(boundsDict["Height"] ?? 0)
+            guard w >= 80, h >= 80 else { continue }
+            // The first normal window for `pid` in on-screen z-order must be `windowID`
+            if ownerPid == pid {
+                return winNum == windowID
+            }
+        }
+        return false
+    }
+
+    private func windowUsesFlippedCoordinates(forPid pid: Int32) -> Bool {
+        let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier?.lowercased() ?? ""
+        if bundleId.contains("wechat") || bundleId.contains("xinwechat") {
+            return true
         }
         return false
     }
@@ -259,8 +320,11 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }
 
-        // CoreGraphics CGEventSetWindowLocation uses top-down window-local coordinates
-        setWindowLocationFn?(event, CGPoint(x: localX, y: localYTopDown))
+        // Match Codex's `windowUsesFlippedCoordinates` branch (0x10075dd84 in SkyComputerUseService):
+        // Flipped custom UIs (WeChat) use top-down localY, whereas standard AppKit NSWindows (Chrome/Safari) use bottom-up localY.
+        let usesFlipped = windowUsesFlippedCoordinates(forPid: pid)
+        let winLocalPt = CGPoint(x: localX, y: usesFlipped ? localYTopDown : localYBottomUp)
+        setWindowLocationFn?(event, winLocalPt)
         event.postToPid(pid)
     }
 
@@ -284,10 +348,12 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }()
 
-        // 1. If the target point is unoccluded on screen (topmost on-screen window at point belongs to `pid`),
+        // 1. If the target app is already the frontmost application and the point is unoccluded on screen,
         // perform an atomic micro-warp + HID event tap click, wait 35ms for WindowServer/Chromium to process
         // the mouseUp event at `cgPt`, and then immediately restore the user's physical cursor.
-        if isPointUnoccludedOnScreen(at: point, forPid: pid) {
+        // When the target app is in the background, we NEVER use `.cghidEventTap` so we never steal OS focus!
+        let isFrontmostApp = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
+        if isFrontmostApp && isPointUnoccludedOnScreen(at: point, forPid: pid) {
             let cgPt = point.cgPoint
             CGWarpMouseCursorPosition(cgPt)
             CGAssociateMouseAndMouseCursorPosition(1)

@@ -44,6 +44,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
             case "snapshot":
                 let snap = try ElementSnapshotStore.shared.captureSnapshot(
                     appName: request.app,
+                    preferredWindowID: request.windowID,
                     focusFirst: request.focus ?? false,
                     windowOnly: request.windowOnly ?? true,
                     enableOCR: request.ocr ?? true,

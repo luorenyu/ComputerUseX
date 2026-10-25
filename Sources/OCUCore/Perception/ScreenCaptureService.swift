@@ -15,6 +15,7 @@ public final class ScreenCaptureService: @unchecked Sendable {
     public func captureDisplayImage(
         for targetRect: ScreenRect? = nil,
         pid: Int32? = nil,
+        preferredWindowID: UInt32? = nil,
         windowOnly: Bool = true
     ) throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
         let targetPoint = targetRect?.center ?? PermissionManager.shared.mainScreenBounds().center
@@ -25,6 +26,7 @@ public final class ScreenCaptureService: @unchecked Sendable {
             displayID: displayInfo.id,
             targetRect: targetRect,
             pid: pid,
+            preferredWindowID: preferredWindowID,
             windowOnly: windowOnly,
             fallbackBounds: displayInfo.bounds,
             scale: displayInfo.scale
@@ -67,10 +69,56 @@ public final class ScreenCaptureService: @unchecked Sendable {
         return (cgImage, displayInfo.bounds, scale)
     }
 
+    /// Captures a fast, lightweight thumbnail of a specific `windowID` (even if occluded behind other windows)
+    /// for the Mini PiP Live Preview Window (`RemoteHostedPIPContentStream` equivalent).
+    public func captureWindowThumbnail(
+        windowID: UInt32,
+        maxDimension: Int = 640
+    ) -> (image: CGImage, bounds: ScreenRect)? {
+        guard windowID > 0 else { return nil }
+        let semaphore = DispatchSemaphore(value: 0)
+        var result: (CGImage, ScreenRect)? = nil
+
+        Task.detached {
+            defer { semaphore.signal() }
+            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+                  let scWin = content.windows.first(where: { $0.windowID == windowID }) else {
+                return
+            }
+            let winRect = ScreenRect(scWin.frame)
+            guard winRect.width >= 60, winRect.height >= 60 else { return }
+
+            let aspect = winRect.width / max(1.0, winRect.height)
+            let targetW: Int
+            let targetH: Int
+            if aspect >= 1.0 {
+                targetW = maxDimension
+                targetH = max(60, Int((Double(maxDimension) / aspect).rounded()))
+            } else {
+                targetH = maxDimension
+                targetW = max(60, Int((Double(maxDimension) * aspect).rounded()))
+            }
+
+            let filter = SCContentFilter(desktopIndependentWindow: scWin)
+            let config = SCStreamConfiguration()
+            config.width = targetW
+            config.height = targetH
+            config.showsCursor = false
+
+            if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) {
+                result = (img, winRect)
+            }
+        }
+
+        _ = semaphore.wait(timeout: .now() + 1.2)
+        return result
+    }
+
     private func captureViaScreenCaptureKit(
         displayID: CGDirectDisplayID,
         targetRect: ScreenRect?,
         pid: Int32?,
+        preferredWindowID: UInt32?,
         windowOnly: Bool,
         fallbackBounds: ScreenRect,
         scale: Double
@@ -93,9 +141,13 @@ public final class ScreenCaptureService: @unchecked Sendable {
                         win.frame.width >= 120 &&
                         win.frame.height >= 120
                     }
+                    let desiredWid = preferredWindowID ?? SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: targetPid)
                     let onScreenPool = appWindows.filter(\.isOnScreen)
                     let candidatePool = onScreenPool.isEmpty ? appWindows : onScreenPool
                     let matchedWindow: SCWindow? = {
+                        if let wid = desiredWid, let exact = appWindows.first(where: { $0.windowID == wid }) {
+                            return exact
+                        }
                         if let tr = targetRect {
                             return candidatePool.max(by: { a, b in
                                 ScreenRect(a.frame).intersectionArea(with: tr) < ScreenRect(b.frame).intersectionArea(with: tr)

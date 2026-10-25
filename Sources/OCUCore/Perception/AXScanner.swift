@@ -2,12 +2,16 @@ import Foundation
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import Darwin
 
 public final class AXScanner: @unchecked Sendable {
     public static let shared = AXScanner()
 
+    private typealias AXUIElementGetWindowFn = @convention(c) (AXUIElement, UnsafeMutablePointer<CGWindowID>) -> AXError
+
     private let lock = NSLock()
     private var liveElementMap: [String: AXUIElement] = [:]
+    private let getWindowIDFn: AXUIElementGetWindowFn?
 
     private let interactiveRoles: Set<String> = [
         "AXButton", "AXTextField", "AXTextArea", "AXCheckBox", "AXRadioButton",
@@ -24,7 +28,22 @@ public final class AXScanner: @unchecked Sendable {
         "AXLayoutArea", "AXScrollBar", "AXRadioGroup", "AXUnknown"
     ]
 
-    private init() {}
+    private init() {
+        if let sym = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "_AXUIElementGetWindow") {
+            self.getWindowIDFn = unsafeBitCast(sym, to: AXUIElementGetWindowFn.self)
+        } else {
+            self.getWindowIDFn = nil
+        }
+    }
+
+    public func cgWindowID(for axWindow: AXUIElement) -> UInt32? {
+        guard let fn = getWindowIDFn else { return nil }
+        var wid: CGWindowID = 0
+        if fn(axWindow, &wid) == .success, wid > 0 {
+            return wid
+        }
+        return nil
+    }
 
     public func resolveLiveAXElement(for ref: String) -> AXUIElement? {
         lock.lock()
@@ -36,17 +55,51 @@ public final class AXScanner: @unchecked Sendable {
         guard let element = resolveLiveAXElement(for: ref) else {
             return false
         }
+        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
         let err = AXUIElementPerformAction(element, kAXPressAction as CFString)
         return err == .success
     }
 
+    /// Sets `kAXValueAttribute` directly on an AX text field / search field in the background without stealing OS focus,
+    /// matching Codex's `ComputerUseAppController.setValue(elementID:value:autosubmitSearchFields:)`.
+    public func performNativeSetValue(ref: String, value: String, submit: Bool = false) -> Bool {
+        guard let element = resolveLiveAXElement(for: ref) else {
+            return false
+        }
+        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        let err = AXUIElementSetAttributeValue(element, kAXValueAttribute as CFString, value as CFTypeRef)
+        guard err == .success else { return false }
+        if submit {
+            _ = AXUIElementPerformAction(element, kAXConfirmAction as CFString)
+        }
+        return true
+    }
+
+    /// Unminimizes, raises (`kAXRaiseAction`), and activates the exact window matching `(pid, windowID)` when the user clicks the Mini PiP preview.
+    public func raiseWindow(pid: Int32, windowID: UInt32) {
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            app.unhide()
+            app.activate()
+        }
+        let axApp = AXUIElementCreateApplication(pid)
+        let allWindows: [AXUIElement] = copyAttribute(axApp, kAXWindowsAttribute as String) ?? []
+        if let targetWin = allWindows.first(where: { cgWindowID(for: $0) == windowID }) ?? allWindows.first {
+            AXUIElementSetAttributeValue(targetWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            AXUIElementSetAttributeValue(targetWin, kAXMainAttribute as CFString, kCFBooleanTrue)
+            AXUIElementSetAttributeValue(targetWin, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            AXUIElementPerformAction(targetWin, kAXRaiseAction as CFString)
+        }
+    }
+
     public func scanApplication(
         appNameFilter: String? = nil,
+        preferredWindowID: UInt32? = nil,
         maxDepth: Int = 16,
         maxElements: Int = 220
     ) -> (
         appName: String,
         pid: Int32,
+        windowID: UInt32?,
         windowTitle: String?,
         windowFrame: ScreenRect?,
         elements: [UIElementRef],
@@ -69,7 +122,7 @@ public final class AXScanner: @unchecked Sendable {
         }
 
         guard let app = targetApp else {
-            return (appNameFilter ?? "Unknown", 0, nil, nil, [], [:])
+            return (appNameFilter ?? "Unknown", 0, nil, nil, nil, [], [:])
         }
 
         let appName = app.localizedName ?? app.bundleIdentifier ?? "App"
@@ -82,6 +135,7 @@ public final class AXScanner: @unchecked Sendable {
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
 
         let desktopBounds = PermissionManager.shared.desktopBounds()
+        var resolvedWindowID: UInt32? = nil
         var windowTitle: String? = nil
         var primaryWindowFrame: ScreenRect? = nil
         var roots: [AXUIElement] = []
@@ -92,40 +146,62 @@ public final class AXScanner: @unchecked Sendable {
             return !isMin
         }
 
-        if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String),
+        let targetWinID = preferredWindowID ?? SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: pid)
+
+        if let desiredWid = targetWinID,
+           let matchedWin = allWindows.first(where: { cgWindowID(for: $0) == desiredWid }) {
+            resolvedWindowID = desiredWid
+            windowTitle = copyStringAttribute(matchedWin, kAXTitleAttribute as String)
+            primaryWindowFrame = copyFrame(matchedWin)
+            roots.append(matchedWin)
+        } else if let focusedWindow: AXUIElement = copyAttribute(axApp, kAXFocusedWindowAttribute as String),
            (copyAttribute(focusedWindow, kAXMinimizedAttribute as String) as Bool? ?? false) == false {
+            resolvedWindowID = cgWindowID(for: focusedWindow)
             windowTitle = copyStringAttribute(focusedWindow, kAXTitleAttribute as String)
             primaryWindowFrame = copyFrame(focusedWindow)
             roots.append(focusedWindow)
         } else if let mainWindow: AXUIElement = copyAttribute(axApp, kAXMainWindowAttribute as String),
                   (copyAttribute(mainWindow, kAXMinimizedAttribute as String) as Bool? ?? false) == false {
+            resolvedWindowID = cgWindowID(for: mainWindow)
             windowTitle = copyStringAttribute(mainWindow, kAXTitleAttribute as String)
             primaryWindowFrame = copyFrame(mainWindow)
             roots.append(mainWindow)
         } else if let firstVisible = visibleWindows.first ?? allWindows.first {
+            resolvedWindowID = cgWindowID(for: firstVisible)
             windowTitle = copyStringAttribute(firstVisible, kAXTitleAttribute as String)
             primaryWindowFrame = copyFrame(firstVisible)
             roots.append(firstVisible)
         }
 
-        // Fallback to CGWindowList bounds if AXWindow frame was not reported
-        if primaryWindowFrame == nil {
+        // Fallback to CGWindowList bounds if AXWindow frame or windowID was not reported
+        if primaryWindowFrame == nil || resolvedWindowID == nil {
             let appWindows = AppWorkspaceController.shared.listRunningApps()
                 .first(where: { $0.pid == pid })?.windows ?? []
-            if let firstWin = appWindows.first {
-                primaryWindowFrame = firstWin.frame
+            let matchedCGWin = targetWinID.flatMap { wid in
+                appWindows.first(where: { UInt32($0.windowId) == wid })
+            } ?? appWindows.first
+            if let cgWin = matchedCGWin {
+                if primaryWindowFrame == nil {
+                    primaryWindowFrame = cgWin.frame
+                }
+                if resolvedWindowID == nil {
+                    resolvedWindowID = UInt32(cgWin.windowId)
+                }
                 if windowTitle == nil || windowTitle?.isEmpty == true {
-                    windowTitle = firstWin.title
+                    windowTitle = cgWin.title
                 }
             }
         }
 
-        if roots.isEmpty {
-            roots.append(axApp)
+        if let wid = resolvedWindowID, wid > 0 {
+            SyntheticFocusEnforcer.shared.pinWindow(pid: pid, windowID: wid)
         }
 
-        if let menuBar: AXUIElement = copyAttribute(axApp, kAXMenuBarAttribute as String) {
-            roots.append(menuBar)
+        if roots.isEmpty {
+            roots.append(axApp)
+            if let menuBar: AXUIElement = copyAttribute(axApp, kAXMenuBarAttribute as String) {
+                roots.append(menuBar)
+            }
         }
 
         var collected: [(UIElementRef, AXUIElement)] = []
@@ -243,7 +319,7 @@ public final class AXScanner: @unchecked Sendable {
         liveElementMap = newMap
         lock.unlock()
 
-        return (appName, pid, windowTitle, primaryWindowFrame, indexedElements, newMap)
+        return (appName, pid, resolvedWindowID, windowTitle, primaryWindowFrame, indexedElements, newMap)
     }
 
     public func updateLiveElementMap(_ map: [String: AXUIElement]) {

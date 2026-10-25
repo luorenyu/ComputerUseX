@@ -57,6 +57,18 @@ public final class MouseController: @unchecked Sendable {
             }
             stateLock.unlock()
 
+            if let rw = resolvedWin {
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .pipTargetWindow(
+                        pid: rw.pid,
+                        windowID: rw.windowID,
+                        appName: rw.appName,
+                        windowTitle: nil,
+                        windowBounds: rw.bounds
+                    )
+                )
+            }
+
             if distance < 2.0 {
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .virtualCursorMove(point: destination, windowID: effWinID, pid: effPid, tiltAngle: 0.0, label: label)
@@ -183,6 +195,16 @@ public final class MouseController: @unchecked Sendable {
             lastTargetWindowID = wc.windowID
             lastTargetWindowBounds = wc.bounds
             stateLock.unlock()
+
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .pipTargetWindow(
+                    pid: wc.pid,
+                    windowID: wc.windowID,
+                    appName: wc.appName,
+                    windowTitle: nil,
+                    windowBounds: wc.bounds
+                )
+            )
         }
 
         let badgeLabel = resolvedElement?.ref ?? "OCU"
@@ -193,8 +215,18 @@ public final class MouseController: @unchecked Sendable {
             )
         )
 
-        // Optional silent AXPress mode if requested, no relative offset is applied, and element supports it
-        if axNative && !hasOffset, let el = resolvedElement, button == .left, clickCount == 1 {
+        let isBackgroundWindow: Bool = {
+            guard let wc = winContext else { return false }
+            return !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: wc.windowID, pid: wc.pid)
+        }()
+
+        // Use native AXPress if explicitly requested OR if clicking an AX element on a background window
+        // so browser/Cocoa buttons and links activate in the background without stealing OS focus.
+        if (axNative || (isVirtual && isBackgroundWindow)) && !hasOffset,
+           let el = resolvedElement,
+           el.source == .ax,
+           button == .left,
+           clickCount == 1 {
             if AXScanner.shared.performNativePress(ref: el.ref) {
                 if isVirtual {
                     try moveSmoothly(
@@ -205,6 +237,16 @@ public final class MouseController: @unchecked Sendable {
                         pid: winContext?.pid,
                         label: badgeLabel
                     )
+                    if let wc = winContext {
+                        KillSwitchMonitor.shared.emitHUDEvent(
+                            .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: true)
+                        )
+                        DispatchQueue.global().asyncAfter(deadline: .now() + 0.14) {
+                            KillSwitchMonitor.shared.emitHUDEvent(
+                                .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: false)
+                            )
+                        }
+                    }
                 }
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .clickRipple(point: targetPoint, button: button, clickCount: clickCount)
@@ -215,7 +257,7 @@ public final class MouseController: @unchecked Sendable {
                     action: "click(ax-native)",
                     targetDescription: targetDesc,
                     point: targetPoint,
-                    details: "Triggered native kAXPressAction",
+                    details: "Triggered native kAXPressAction (background=\(isBackgroundWindow))",
                     elapsedMs: ms
                 )
             }

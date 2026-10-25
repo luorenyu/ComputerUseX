@@ -28,12 +28,34 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
 
     public init() {}
 
+    private var isTargetInBackground: Bool {
+        let pipVM = MiniPreviewWindowController.shared.viewModel
+        guard pipVM.isEnabled, pipVM.targetWindowID > 0 else { return false }
+        return !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(
+            windowID: pipVM.targetWindowID,
+            pid: pipVM.targetPid
+        )
+    }
+
     public func handle(_ event: HUDAnimationEvent) {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.isHUDEnabled else { return }
 
             switch event {
+            case .pipTargetWindow(let pid, let windowID, let appName, let windowTitle, let windowBounds):
+                MiniPreviewWindowController.shared.updateTargetWindow(
+                    pid: pid,
+                    windowID: windowID,
+                    appName: appName,
+                    windowTitle: windowTitle,
+                    windowBounds: windowBounds
+                )
+
             case .setActiveGlow(let active):
+                if self.isTargetInBackground {
+                    self.showBorderGlow = false
+                    return
+                }
                 withAnimation(.easeInOut(duration: 0.25)) {
                     self.showBorderGlow = active
                 }
@@ -42,6 +64,13 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
 
             case .statusPill(let title, let subtitle):
+                MiniPreviewWindowController.shared.updateStatus(title)
+                if self.isTargetInBackground {
+                    self.showBorderGlow = false
+                    self.pillTitle = nil
+                    self.pillSubtitle = nil
+                    return
+                }
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
                     self.pillTitle = title
                     self.pillSubtitle = subtitle
@@ -50,6 +79,10 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 self.scheduleAutoFade()
 
             case .pointerTrail(let points):
+                if self.isTargetInBackground {
+                    self.trailPoints = []
+                    return
+                }
                 self.trailPoints = points
                 self.trailClearItem?.cancel()
                 let item = DispatchWorkItem { [weak self] in
@@ -61,6 +94,12 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
 
             case .highlightElement(let rect, let label):
+                MiniPreviewWindowController.shared.showHighlight(rect: rect, label: label)
+                if self.isTargetInBackground {
+                    self.highlightRect = nil
+                    self.highlightLabel = nil
+                    return
+                }
                 withAnimation(.easeOut(duration: 0.15)) {
                     self.highlightRect = rect
                     self.highlightLabel = label
@@ -76,6 +115,10 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.1, execute: item)
 
             case .clickRipple(let point, let button, let clickCount):
+                MiniPreviewWindowController.shared.addClickRipple(at: point)
+                if self.isTargetInBackground {
+                    return
+                }
                 let ripple = RippleItem(point: point, button: button, clickCount: clickCount)
                 self.ripples.append(ripple)
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
@@ -84,20 +127,42 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 self.scheduleAutoFade()
 
             case .virtualCursorMove(let point, let windowID, let pid, let tiltAngle, let label):
-                VirtualCursorWindowController.shared.moveCursor(
-                    to: point,
+                MiniPreviewWindowController.shared.updateCursor(
+                    screenPoint: point,
                     windowID: windowID,
                     pid: pid,
                     tiltAngle: tiltAngle,
                     label: label
                 )
+                let effWid = windowID ?? MiniPreviewWindowController.shared.viewModel.targetWindowID
+                let effPid = pid ?? MiniPreviewWindowController.shared.viewModel.targetPid
+                let isFront = (effWid == 0) || SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: effWid, pid: effPid)
+                if !isFront && MiniPreviewWindowController.shared.viewModel.isEnabled {
+                    VirtualCursorWindowController.shared.hideCursor()
+                } else {
+                    VirtualCursorWindowController.shared.moveCursor(
+                        to: point,
+                        windowID: windowID,
+                        pid: pid,
+                        tiltAngle: tiltAngle,
+                        label: label
+                    )
+                }
 
             case .virtualCursorPress(let point, let windowID, let isPressed):
-                VirtualCursorWindowController.shared.setPressed(
-                    isPressed,
-                    at: point,
-                    windowID: windowID
-                )
+                MiniPreviewWindowController.shared.updateCursorPressed(isPressed, screenPoint: point)
+                let effWid = windowID ?? MiniPreviewWindowController.shared.viewModel.targetWindowID
+                let effPid = MiniPreviewWindowController.shared.viewModel.targetPid
+                let isFront = (effWid == 0) || SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: effWid, pid: effPid)
+                if !isFront && MiniPreviewWindowController.shared.viewModel.isEnabled {
+                    VirtualCursorWindowController.shared.hideCursor()
+                } else {
+                    VirtualCursorWindowController.shared.setPressed(
+                        isPressed,
+                        at: point,
+                        windowID: windowID
+                    )
+                }
 
             case .virtualCursorHide:
                 VirtualCursorWindowController.shared.hideCursor()

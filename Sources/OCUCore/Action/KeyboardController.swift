@@ -119,6 +119,69 @@ public final class KeyboardController: @unchecked Sendable {
             try KillSwitchMonitor.shared.verifySafeToProceed()
         }
 
+        let offsetX = dx ?? 0
+        let offsetY = dy ?? 0
+        let hasOffset = (abs(offsetX) > 0.1 || abs(offsetY) > 0.1)
+
+        // When targeting an AX text field in a background window with no relative offset, try setting
+        // kAXValueAttribute directly so background browsers/Cocoa apps receive text without stealing OS focus
+        // or touching the user's system clipboard.
+        if isVirtual && !hasOffset,
+           let targetRef = target, !targetRef.isEmpty,
+           let el = try? ElementSnapshotStore.shared.resolveTarget(targetRef),
+           el.source == .ax {
+            let winCtx = SyntheticFocusEnforcer.shared.resolveTargetWindow(
+                at: el.centerPoint,
+                preferredPid: el.pid,
+                preferredAppName: el.appName
+            )
+            let isBackground = winCtx.map {
+                !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: $0.windowID, pid: $0.pid)
+            } ?? false
+
+            if isBackground && AXScanner.shared.performNativeSetValue(ref: el.ref, value: text, submit: submit) {
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .highlightElement(rect: el.frame, label: "\(el.ref) \(el.label)")
+                )
+                try MouseController.shared.moveSmoothly(
+                    to: el.centerPoint,
+                    duration: 0.14,
+                    virtualCursor: true,
+                    windowID: winCtx?.windowID,
+                    pid: el.pid,
+                    label: el.ref
+                )
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .clickRipple(point: el.centerPoint, button: .left, clickCount: 1)
+                )
+                let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .statusPill(title: "⌨️ [后台输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
+                )
+                if submit {
+                    if let wc = winCtx {
+                        SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
+                            pid: wc.pid,
+                            windowID: wc.windowID,
+                            windowBounds: wc.bounds,
+                            activationPoint: el.centerPoint
+                        )
+                    }
+                    Thread.sleep(forTimeInterval: 0.04)
+                    postKeyCode(36, flags: [], targetPid: el.pid)
+                }
+                let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+                KillSwitchMonitor.shared.logAction("⌨️ [AXValue] Typed \"\(preview)\" -> \(el.ref)")
+                return ActionOutcome(
+                    action: "type(ax-native)",
+                    targetDescription: "\(el.ref) [\(el.role): \(el.label)]",
+                    point: el.centerPoint,
+                    details: "length=\(text.count), submit=\(submit), mode=ax-value-background",
+                    elapsedMs: ms
+                )
+            }
+        }
+
         var clickedPoint: ScreenPoint? = nil
         var targetDesc = target ?? "focused field"
         if (target != nil && !target!.isEmpty) || (x != nil && y != nil) {

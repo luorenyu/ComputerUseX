@@ -25,6 +25,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
     public func captureSnapshot(
         appName: String? = nil,
+        preferredWindowID: UInt32? = nil,
         focusFirst: Bool = false,
         windowOnly: Bool = true,
         enableOCR: Bool = true,
@@ -44,7 +45,10 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         )
 
         // 1. Scan Accessibility Tree
-        let axScan = AXScanner.shared.scanApplication(appNameFilter: appName)
+        let axScan = AXScanner.shared.scanApplication(
+            appNameFilter: appName,
+            preferredWindowID: preferredWindowID
+        )
         var axElements = axScan.elements
         if windowOnly, let winRect = axScan.windowFrame {
             let inWinAX = axElements.filter { $0.frame.intersectionArea(with: winRect) > 0 }
@@ -52,6 +56,20 @@ public final class ElementSnapshotStore: @unchecked Sendable {
                 axElements = inWinAX
             }
         }
+        // Keep exact 1:1 pairing between each AX UIElementRef and its live AXUIElement before any re-indexing
+        let pairedRawAX: [AXUIElement?] = axElements.map { axScan.rawAXMap[$0.ref] }
+        var reindexedAX: [UIElementRef] = []
+        var updatedAXMap: [String: AXUIElement] = [:]
+        for (idx, var el) in axElements.enumerated() {
+            let newRef = "@e\(idx + 1)"
+            el.ref = newRef
+            reindexedAX.append(el)
+            if let raw = pairedRawAX[idx] {
+                updatedAXMap[newRef] = raw
+            }
+        }
+        axElements = reindexedAX
+        AXScanner.shared.updateLiveElementMap(updatedAXMap)
         var ocrElements: [UIElementRef] = []
         var capturedImage: CGImage? = nil
         var displayBounds = axScan.windowFrame ?? PermissionManager.shared.displayContaining(
@@ -59,12 +77,25 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         ).bounds
         var scaleFactor = PermissionManager.shared.mainScreenScaleFactor()
 
+        if let wid = axScan.windowID, wid > 0, axScan.pid > 0 {
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .pipTargetWindow(
+                    pid: axScan.pid,
+                    windowID: wid,
+                    appName: axScan.appName,
+                    windowTitle: axScan.windowTitle,
+                    windowBounds: displayBounds
+                )
+            )
+        }
+
         // 2. Capture the target window (or display if !windowOnly) if OCR, SoM, or outputPath is requested
         let needsScreenImage = enableOCR || enableSoM || (outputPath != nil) || includeBase64 || (axElements.count < 12)
         if needsScreenImage {
             if let capture = try? ScreenCaptureService.shared.captureDisplayImage(
                 for: axScan.windowFrame,
                 pid: axScan.pid,
+                preferredWindowID: axScan.windowID,
                 windowOnly: windowOnly
             ) {
                 capturedImage = capture.image
@@ -93,14 +124,6 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             let merged = VisionOCRScanner.mergeElements(axElements: axElements, ocrCandidates: candidates)
             ocrElements = merged.filter { $0.source == .ocr }
             axElements = merged.filter { $0.source == .ax }
-
-            var updatedAXMap: [String: AXUIElement] = [:]
-            for el in axElements {
-                if let raw = axScan.rawAXMap[el.ref] {
-                    updatedAXMap[el.ref] = raw
-                }
-            }
-            AXScanner.shared.updateLiveElementMap(updatedAXMap)
         }
 
         let allElements = axElements + ocrElements
@@ -139,6 +162,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         let snapshot = SnapshotResult(
             activeApp: axScan.appName,
             activePid: axScan.pid,
+            windowID: axScan.windowID,
             windowTitle: axScan.windowTitle,
             screenBounds: displayBounds,
             scaleFactor: scaleFactor,

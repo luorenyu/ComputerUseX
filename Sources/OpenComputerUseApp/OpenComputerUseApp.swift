@@ -12,6 +12,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     @Published public var killSwitchTripped: Bool = false
     @Published public var humanTakeoverGuard: Bool = true
     @Published public var virtualCursorMode: Bool = true
+    @Published public var miniPiPPreviewMode: Bool = true
 
     private let ipcServer = UnixSocketIPC()
     private var timer: Timer?
@@ -23,6 +24,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     public func startServices() {
         OverlayHUDWindowController.shared.setupOverlayWindow()
         VirtualCursorWindowController.shared.ensureWindowCreated()
+        MiniPreviewWindowController.shared.ensureWindowCreated()
 
         KillSwitchMonitor.shared.setHUDHandler { event in
             OverlayHUDWindowController.shared.viewModel.handle(event)
@@ -213,6 +215,18 @@ struct OpenComputerUseMenuBarApp: App {
                         MouseController.shared.useVirtualCursorByDefault = val
                         if !val {
                             VirtualCursorWindowController.shared.hideCursor()
+                        }
+                    }
+                ))
+                .font(.system(size: 12))
+
+                Toggle("开启后台小窗实时预览 (Codex PiP 模式)", isOn: Binding(
+                    get: { coordinator.miniPiPPreviewMode },
+                    set: { val in
+                        coordinator.miniPiPPreviewMode = val
+                        MiniPreviewWindowController.shared.viewModel.isEnabled = val
+                        if !val {
+                            MiniPreviewWindowController.shared.hidePreview()
                         }
                     }
                 ))

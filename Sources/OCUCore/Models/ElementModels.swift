@@ -108,6 +108,7 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
     public var timestamp: String
     public var activeApp: String
     public var activePid: Int32
+    public var windowID: UInt32?
     public var windowTitle: String?
     public var screenBounds: ScreenRect
     public var scaleFactor: Double
@@ -123,6 +124,7 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         timestamp: String = ISO8601DateFormatter().string(from: Date()),
         activeApp: String,
         activePid: Int32,
+        windowID: UInt32? = nil,
         windowTitle: String?,
         screenBounds: ScreenRect,
         scaleFactor: Double,
@@ -137,6 +139,7 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         self.timestamp = timestamp
         self.activeApp = activeApp
         self.activePid = activePid
+        self.windowID = windowID
         self.windowTitle = windowTitle
         self.screenBounds = screenBounds
         self.scaleFactor = scaleFactor
@@ -153,7 +156,8 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         var lines: [String] = []
         let b = screenBounds
         let boundsDesc = "[\(Int(b.x)),\(Int(b.y)) \(Int(b.width))x\(Int(b.height))]"
-        lines.append("# snap:\(snapshotId) | app:\(activeApp)(\(activePid)) | win:\(windowTitle ?? "-") \(boundsDesc) | total:\(elements.count)(ax:\(axCount),ocr:\(ocrCount))")
+        let widTag = windowID != nil ? "#\(windowID!) " : ""
+        lines.append("# snap:\(snapshotId) | app:\(activeApp)(\(activePid)) | win:\(widTag)\(windowTitle ?? "-") \(boundsDesc) | total:\(elements.count)(ax:\(axCount),ocr:\(ocrCount))")
         if let som = annotatedScreenshotPath {
             lines.append("# som:\(som)")
         } else if let raw = screenshotPath {

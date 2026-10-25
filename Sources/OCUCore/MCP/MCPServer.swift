@@ -160,9 +160,11 @@ public final class MCPServer: @unchecked Sendable {
                 launch: arguments["launch"] as? Bool ?? true
             )
         case "ocu_snapshot":
+            let winID = intVal(arguments["window_id"]).map { UInt32($0) }
             return IPCRequest(
                 command: "snapshot",
                 app: arguments["app"] as? String,
+                windowID: winID,
                 ocr: arguments["ocr"] as? Bool ?? true,
                 som: arguments["som"] as? Bool ?? false,
                 focus: arguments["focus"] as? Bool ?? false,
