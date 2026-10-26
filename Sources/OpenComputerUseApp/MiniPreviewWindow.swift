@@ -37,7 +37,7 @@ public final class MiniPreviewViewModel: ObservableObject, @unchecked Sendable {
     @Published public var cursorBadge: String = "OCU"
     @Published public var statusText: String = "后台协作就绪"
     @Published public var operatorAgentName: String = "Antigravity"
-    @Published public var operatorModelName: String = "Gemini 2.5 Pro"
+    @Published public var operatorModelName: String = "Gemini 4 Argon Medium"
     @Published public var operatorStepCount: Int = 0
     @Published public var operatorCostUSD: Double = 0.0
 
@@ -62,6 +62,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
     private var panel: MiniPreviewPanel?
     private var captureTimer: Timer?
     private var autoHideWorkItem: DispatchWorkItem?
+    private var thinkingStatusWorkItem: DispatchWorkItem?
     private let captureQueue = DispatchQueue(label: "org.opencomputeruse.pip.capture", qos: .userInteractive)
     private var isCapturingFrame = false
 
@@ -157,6 +158,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
         windowBounds: ScreenRect
     ) {
         guard viewModel.isEnabled, windowID > 0 else { return }
+        if appName.lowercased().contains("opencomputeruse") { return }
         DispatchQueue.main.async {
             self.ensureWindowCreated()
             self.viewModel.targetPid = pid
@@ -171,9 +173,9 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
             let isFront = SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: windowID, pid: pid)
             self.viewModel.isBackgroundMode = !isFront
-            if isFront {
-                self.hidePreview()
-            } else {
+            // Once a session preview is open (or when the target window is in background), keep it continuously visible
+            // throughout the entire Agent task session without flickering between steps!
+            if !isFront || self.viewModel.isVisible {
                 self.showPreviewWindow()
                 self.triggerImmediateCapture()
             }
@@ -217,9 +219,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                 pid: self.viewModel.targetPid
             )
             self.viewModel.isBackgroundMode = !isFront
-            if isFront {
-                self.hidePreview()
-            } else {
+            if !isFront || self.viewModel.isVisible {
                 self.showPreviewWindow()
                 self.triggerImmediateCapture()
             }
@@ -334,8 +334,32 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
     public func hidePreview() {
         DispatchQueue.main.async {
             self.autoHideWorkItem?.cancel()
+            self.thinkingStatusWorkItem?.cancel()
             self.viewModel.isVisible = false
             self.panel?.orderOut(nil)
+        }
+    }
+
+    /// Smoothly transitions the preview status to "task finished" and hides the window once the Agent completes its session.
+    public func completeAndHidePreview() {
+        DispatchQueue.main.async {
+            self.autoHideWorkItem?.cancel()
+            self.thinkingStatusWorkItem?.cancel()
+            guard self.viewModel.isVisible else { return }
+            self.viewModel.statusText = "✅ 本次操作任务已完成"
+            let item = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.viewModel.isVisible = false
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.32) {
+                    if !self.viewModel.isVisible {
+                        self.panel?.orderOut(nil)
+                    }
+                }
+            }
+            self.autoHideWorkItem = item
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2, execute: item)
         }
     }
 
@@ -353,6 +377,18 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
 
     private func scheduleAutoHide() {
         autoHideWorkItem?.cancel()
+        thinkingStatusWorkItem?.cancel()
+
+        // Between Agent tool calls (while LLM is analyzing the snapshot and planning the next step),
+        // keep the preview window open and show a clear "Agent thinking" indicator after 2.0s!
+        let thinkingItem = DispatchWorkItem { [weak self] in
+            guard let self = self, self.viewModel.isVisible else { return }
+            self.viewModel.statusText = "⏳ Agent 正在分析与规划下一步..."
+        }
+        thinkingStatusWorkItem = thinkingItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: thinkingItem)
+
+        // Only auto-hide if no further Agent activity occurs for 45 seconds (matching session timeout)
         let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
             withAnimation(.easeInOut(duration: 0.3)) {
@@ -365,7 +401,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
         }
         autoHideWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 4.5, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 45.0, execute: item)
     }
 
     private func triggerImmediateCapture() {

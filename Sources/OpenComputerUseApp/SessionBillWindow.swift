@@ -14,8 +14,8 @@ public final class SessionBillViewModel: ObservableObject, @unchecked Sendable {
     @Published public var recentBills: [UsageSessionBill] = []
 
     // Live operator state while session is active
-    @Published public var activeAgentName: String = "Antigravity Agent"
-    @Published public var activeModelName: String = "Gemini 2.5 Pro"
+    @Published public var activeAgentName: String = "Antigravity"
+    @Published public var activeModelName: String = "Gemini 4 Argon Medium"
     @Published public var activeActionText: String = "待命就绪"
     @Published public var activeStepCount: Int = 0
     @Published public var activeTotalTokens: Int = 0
@@ -27,12 +27,12 @@ public final class SessionBillViewModel: ObservableObject, @unchecked Sendable {
     }
 
     public func refreshFromDisk() {
-        let bills = SessionBillingManager.shared.recentBills(limit: 8)
+        let bills = SessionBillingManager.shared.recentBills(limit: 25)
         let detected = SessionBillingManager.shared.detectCurrentOperator()
         DispatchQueue.main.async {
             self.recentBills = bills.reversed()
-            if self.currentBill == nil {
-                self.currentBill = bills.last
+            if let latest = bills.last {
+                self.currentBill = latest
             }
             if !self.isSessionRunning {
                 self.activeAgentName = detected.agentName
@@ -104,6 +104,17 @@ public final class SessionBillWindowController: @unchecked Sendable {
             self.viewModel.activeTotalTokens = totalTokens
             self.viewModel.activeCostUSD = costUSD
             self.viewModel.isSessionRunning = true
+        }
+    }
+
+    public func recordCompletedBillSilently(_ bill: UsageSessionBill) {
+        DispatchQueue.main.async {
+            self.viewModel.isSessionRunning = false
+            self.viewModel.activeAgentName = bill.agentName
+            self.viewModel.activeModelName = bill.modelName
+            self.viewModel.activeActionText = "已完成 (\(bill.actionCount) 步)"
+            self.viewModel.currentBill = bill
+            self.viewModel.refreshFromDisk()
         }
     }
 
@@ -221,8 +232,9 @@ struct SessionBillReceiptView: View {
                 HStack(spacing: 10) {
                     BillMetricBox(
                         icon: "clock.fill",
-                        label: "消耗时间 (\(bill.actionCount) 步)",
-                        value: String(format: "%.2f 秒", bill.totalDurationSeconds),
+                        label: "耗时 (\(bill.actionCount) 步)",
+                        value: String(format: "总 %.2fs", max(bill.totalDurationSeconds, bill.toolExecutionSeconds)),
+                        subvalue: String(format: "工具 %.2fs", bill.toolExecutionSeconds),
                         accent: .green
                     )
                     BillMetricBox(
@@ -251,26 +263,6 @@ struct SessionBillReceiptView: View {
                     }
 
                     Spacer()
-
-                    if bill.savedTokens > 0 {
-                        VStack(alignment: .trailing, spacing: 2) {
-                            Text("引擎为您省下")
-                                .font(.system(size: 9.5, weight: .medium))
-                                .foregroundColor(.cyan.opacity(0.9))
-                            Text("-\(bill.savedTokens) tok")
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                .foregroundColor(.cyan)
-                            Text(String(format: "省 $%.4f", bill.savedCostUSD))
-                                .font(.system(size: 9.5, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.65))
-                        }
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color.cyan.opacity(0.14))
-                        )
-                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)

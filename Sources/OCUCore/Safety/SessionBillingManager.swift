@@ -128,10 +128,34 @@ public struct UsageSessionBill: Codable, Equatable, Sendable, Identifiable {
         self.steps = steps
     }
 
+    public var toolExecutionSeconds: Double {
+        Double(activeExecutionMs) / 1000.0
+    }
+
+    public var formattedDurationSummary: String {
+        let totalSec = max(totalDurationSeconds, toolExecutionSeconds)
+        return String(
+            format: "总耗时 %.2fs + ComputerUse工具调用耗时 %.2fs (%dms, 共 %d 步)",
+            totalSec,
+            toolExecutionSeconds,
+            activeExecutionMs,
+            actionCount
+        )
+    }
+
+    public var formattedDurationCompact: String {
+        let totalSec = max(totalDurationSeconds, toolExecutionSeconds)
+        return String(
+            format: "总耗时 %.1fs + 工具耗时 %.1fs (%d步)",
+            totalSec,
+            toolExecutionSeconds,
+            actionCount
+        )
+    }
+
     public func formatReceiptText() -> String {
         let appsStr = targetApps.isEmpty ? "系统桌面" : targetApps.joined(separator: ", ")
         let cnyEstimate = costUSD * 7.20
-        let savedCny = savedCostUSD * 7.20
         var lines: [String] = []
         lines.append("╔══════════════════════════════════════════════════════════════════╗")
         lines.append("║                 🧾 OpenComputerUse 使用账单明细                  ║")
@@ -140,15 +164,11 @@ public struct UsageSessionBill: Codable, Equatable, Sendable, Identifiable {
         lines.append("║ 操作主体 (Agent)     : 🤖 \(agentName)")
         lines.append("║ 驱动模型 (Model)     : 🧠 \(modelName)")
         lines.append("║ 操控应用 (Apps)      : 🖥️ \(appsStr)")
-        lines.append("║ 耗时统计 (Duration)  : ⏱️ \(String(format: "%.2fs", totalDurationSeconds)) (执行 \(actionCount) 步动作, 引擎耗时 \(activeExecutionMs)ms)")
+        lines.append("║ 耗时统计 (Duration)  : ⏱️ \(formattedDurationSummary)")
         lines.append("║ Token 消耗明细       : 📊 共 \(totalTokens) Tokens")
         lines.append("║   ├─ 输入 (Prompt)   : \(inputTokens) Tokens")
-        lines.append("║   ├─ 输出 (Snapshot) : \(outputTokens) Tokens (含视觉 Token: \(visionTokens))")
-        lines.append("║   └─ 压缩节省 (Saved): 💎 省下 \(savedTokens) Tokens (Compact + AX Diff + 图像去重)")
+        lines.append("║   └─ 输出 (Snapshot) : \(outputTokens) Tokens (含视觉 Token: \(visionTokens))")
         lines.append("║ 折算费用 (Cost USD)  : 💵 $\(String(format: "%.5f", costUSD)) USD (约 ¥\(String(format: "%.4f", cnyEstimate)) CNY)")
-        if savedCostUSD > 0 {
-            lines.append("║ 帮您节省 (Saved USD) : 🎉 $\(String(format: "%.5f", savedCostUSD)) USD (约 ¥\(String(format: "%.4f", savedCny)) CNY)")
-        }
         lines.append("╚══════════════════════════════════════════════════════════════════╝")
         return lines.joined(separator: "\n")
     }
@@ -161,14 +181,16 @@ public final class SessionBillingManager: @unchecked Sendable {
     private let lock = NSLock()
     private var mcpClientName: String?
     private var mcpModelHint: String?
+    private var lastExplicitAgent: String?
+    private var lastExplicitModel: String?
 
     // Active session state
     private var activeSessionId: String?
     private var sessionStartDate: Date?
     private var lastActivityDate: Date?
     private var currentOperator: AgentOperatorIdentity = AgentOperatorIdentity(
-        agentName: "AI Agent",
-        modelName: "Claude Sonnet 4 / Gemini 2.5 Pro"
+        agentName: "Antigravity",
+        modelName: "Gemini 4 Argon Medium"
     )
     private var activeTargetApps: [String] = []
     private var activeSteps: [UsageStepRecord] = []
@@ -180,19 +202,61 @@ public final class SessionBillingManager: @unchecked Sendable {
     private var idleFinalizeWorkItem: DispatchWorkItem?
 
     /// Idle window (seconds) after which an active sequence of ComputerUse commands is finalized into a complete bill.
-    public var sessionIdleTimeoutSeconds: TimeInterval = 6.5
+    /// Set to 45s so multi-turn Agent workflows (where the LLM reasons for 5–20s between steps) stay in one continuous task session.
+    public var sessionIdleTimeoutSeconds: TimeInterval = 45.0
 
     public var billsFileURL: URL {
         AuditAndSecurityGuard.shared.baseDirectory.appendingPathComponent("bills.jsonl")
     }
 
-    private init() {}
+    public var operatorStateFileURL: URL {
+        AuditAndSecurityGuard.shared.baseDirectory.appendingPathComponent("operator_context.json")
+    }
+
+    private init() {
+        loadPersistedOperatorContext()
+    }
+
+    private func loadPersistedOperatorContext() {
+        guard let data = try? Data(contentsOf: operatorStateFileURL),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: String] else {
+            return
+        }
+        if let a = dict["agentName"], !a.isEmpty {
+            lastExplicitAgent = a
+        }
+        if let m = dict["modelName"], !m.isEmpty {
+            lastExplicitModel = m
+        }
+        if let a = lastExplicitAgent, let m = lastExplicitModel {
+            currentOperator = AgentOperatorIdentity(agentName: a, modelName: m)
+        }
+    }
+
+    private func savePersistedOperatorContext(agent: String?, model: String?) {
+        var dict: [String: String] = [:]
+        if let data = try? Data(contentsOf: operatorStateFileURL),
+           let existing = try? JSONSerialization.jsonObject(with: data) as? [String: String] {
+            dict = existing
+        }
+        if let a = agent, !a.isEmpty {
+            dict["agentName"] = a
+        }
+        if let m = model, !m.isEmpty {
+            dict["modelName"] = m
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted]) {
+            try? data.write(to: operatorStateFileURL, options: .atomic)
+        }
+    }
 
     // MARK: - Pricing Table
 
     public static func priceRate(for modelName: String) -> ModelPriceRate {
         let lower = modelName.lowercased()
-        if lower.contains("opus") {
+        if lower.contains("argon") || lower.contains("gemini 4") || lower.contains("gemini-4") {
+            return ModelPriceRate(modelFamily: "Gemini 4 Argon Medium", inputPerMillionUSD: 1.50, outputPerMillionUSD: 10.0)
+        } else if lower.contains("opus") {
             return ModelPriceRate(modelFamily: "Claude Opus 4", inputPerMillionUSD: 15.0, outputPerMillionUSD: 75.0)
         } else if lower.contains("haiku") {
             return ModelPriceRate(modelFamily: "Claude 3.5 Haiku", inputPerMillionUSD: 0.80, outputPerMillionUSD: 4.0)
@@ -226,14 +290,19 @@ public final class SessionBillingManager: @unchecked Sendable {
         lock.lock()
         if let n = name, !n.isEmpty {
             mcpClientName = n
+            lastExplicitAgent = n
         }
         if let m = modelHint, !m.isEmpty {
             mcpModelHint = m
+            lastExplicitModel = m
         }
         lock.unlock()
+        if (name != nil && !name!.isEmpty) || (modelHint != nil && !modelHint!.isEmpty) {
+            savePersistedOperatorContext(agent: name, model: modelHint)
+        }
     }
 
-    /// Inspects explicit flags, environment variables, MCP handshake, and macOS process ancestry (`getppid()` chain)
+    /// Inspects explicit flags, environment variables, MCP handshake, persisted operator context, and macOS process ancestry (`getppid()` chain)
     /// to determine which AI Agent and LLM Model is currently operating OpenComputerUse.
     public func detectCurrentOperator(
         explicitAgent: String? = nil,
@@ -241,17 +310,35 @@ public final class SessionBillingManager: @unchecked Sendable {
     ) -> AgentOperatorIdentity {
         let env = ProcessInfo.processInfo.environment
 
-        var resolvedAgent = explicitAgent?.trimmingCharacters(in: .whitespacesAndNewlines)
-        var resolvedModel = explicitModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanExplicitAgent = explicitAgent?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanExplicitModel = explicitModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        lock.lock()
+        if let ea = cleanExplicitAgent, !ea.isEmpty {
+            lastExplicitAgent = ea
+        }
+        if let em = cleanExplicitModel, !em.isEmpty {
+            lastExplicitModel = em
+        }
+        let stickyAgent = lastExplicitAgent
+        let stickyModel = lastExplicitModel
+        lock.unlock()
+
+        if (cleanExplicitAgent != nil && !cleanExplicitAgent!.isEmpty) || (cleanExplicitModel != nil && !cleanExplicitModel!.isEmpty) {
+            savePersistedOperatorContext(agent: cleanExplicitAgent ?? stickyAgent, model: cleanExplicitModel ?? stickyModel)
+        }
+
+        var resolvedAgent = cleanExplicitAgent
+        var resolvedModel = cleanExplicitModel
 
         if resolvedAgent == nil || resolvedAgent!.isEmpty {
-            resolvedAgent = env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"] ?? mcpClientName
+            resolvedAgent = env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"] ?? mcpClientName ?? stickyAgent
         }
         if resolvedModel == nil || resolvedModel!.isEmpty {
-            resolvedModel = env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? mcpModelHint
+            resolvedModel = env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? mcpModelHint ?? stickyModel
         }
 
-        // Walk parent process chain (up to 6 levels) if agent is not explicitly provided
+        // Walk parent process chain (up to 7 levels) if agent is not explicitly provided
         let ancestry = Self.collectProcessAncestry(maxDepth: 7)
         let joinedAncestry = ancestry.joined(separator: " | ").lowercased()
 
@@ -271,27 +358,26 @@ public final class SessionBillingManager: @unchecked Sendable {
             } else if joinedAncestry.contains("gemini") {
                 resolvedAgent = "Gemini CLI"
             } else {
-                // Check if Antigravity is running and owns our workspace
                 if FileManager.default.fileExists(atPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity").path) {
-                    resolvedAgent = "Antigravity Agent"
+                    resolvedAgent = "Antigravity"
                 } else {
                     resolvedAgent = "Terminal CLI Agent"
                 }
             }
         }
 
-        let finalAgent = resolvedAgent ?? "Antigravity Agent"
+        let finalAgent = resolvedAgent ?? "Antigravity"
 
         if resolvedModel == nil || resolvedModel!.isEmpty {
             resolvedModel = Self.inferModelForAgent(finalAgent, ancestryText: joinedAncestry)
         }
 
-        let finalModel = resolvedModel ?? "Gemini 2.5 Pro"
+        let finalModel = resolvedModel ?? "Gemini 4 Argon Medium"
         return AgentOperatorIdentity(
             agentName: finalAgent,
             modelName: finalModel,
             clientPid: getpid(),
-            sourceDescription: "ancestry"
+            sourceDescription: (cleanExplicitModel != nil) ? "agent-reported" : "ancestry"
         )
     }
 
@@ -320,7 +406,7 @@ public final class SessionBillingManager: @unchecked Sendable {
         }
 
         if lowerAgent.contains("antigravity") {
-            return "Gemini 2.5 Pro / Claude Sonnet 4"
+            return "Gemini 4 Argon Medium"
         }
 
         if lowerAgent.contains("cursor") {
@@ -328,10 +414,10 @@ public final class SessionBillingManager: @unchecked Sendable {
         }
 
         if lowerAgent.contains("gemini") {
-            return "gemini-2.5-pro"
+            return "Gemini 4 Argon Medium"
         }
 
-        return "claude-sonnet-4"
+        return "Gemini 4 Argon Medium"
     }
 
     private static func collectProcessAncestry(maxDepth: Int) -> [String] {
@@ -381,8 +467,8 @@ public final class SessionBillingManager: @unchecked Sendable {
         response: IPCResponse,
         elapsedMs: Int
     ) {
-        // Skip internal HUD event forwarding or pure status pings from starting a bill
-        let ignoredCommands: Set<String> = ["hud_event", "status", "bill", "bills", "audit"]
+        // Skip internal HUD event forwarding, pure status pings, or outer batch containers (inner steps are recorded individually)
+        let ignoredCommands: Set<String> = ["hud_event", "status", "bill", "bills", "audit", "batch", "dashboard", "open", "session_finish"]
         if ignoredCommands.contains(request.command) {
             return
         }
@@ -409,11 +495,9 @@ public final class SessionBillingManager: @unchecked Sendable {
             targetDesc = "\(snap.activeApp) (\(snap.elements.count) elements)"
             let compactStr = snap.formatCompact()
             stepOutputTokens = Self.estimateTokens(for: compactStr)
-            // Compact tabular format saves ~60% compared to verbose raw JSON element trees
             stepSavedTokens += Int(Double(stepOutputTokens) * 1.4)
 
             if snap.imageDeduplicated == true {
-                // Perceptual hash deduplication saved ~1,150 vision tokens!
                 stepSavedTokens += 1150
             } else if snap.imageBase64 != nil || snap.annotatedScreenshotPath != nil || snap.screenshotPath != nil {
                 stepVisionTokens = 1100
@@ -424,7 +508,6 @@ public final class SessionBillingManager: @unchecked Sendable {
             let outText = [out.action, out.targetDescription, out.details].compactMap { $0 }.joined(separator: " ")
             stepOutputTokens = max(28, Self.estimateTokens(for: outText))
             if out.details?.contains("focus:") == true || out.details?.contains("changed:") == true || out.details?.contains("added(") == true {
-                // Post-action AX diff avoided a full follow-up screenshot + snapshot turn (~1,400 tokens saved!)
                 stepSavedTokens += 950
             }
         }
@@ -433,7 +516,8 @@ public final class SessionBillingManager: @unchecked Sendable {
         let now = Date()
         if activeSessionId == nil {
             activeSessionId = UUID().uuidString.prefix(8).lowercased()
-            sessionStartDate = now
+            // Start time is the moment the very first command began executing
+            sessionStartDate = now.addingTimeInterval(-Double(max(1, elapsedMs)) / 1000.0)
             activeTargetApps = []
             activeSteps = []
             cumulativeInputTokens = 0
@@ -499,7 +583,7 @@ public final class SessionBillingManager: @unchecked Sendable {
         idleFinalizeWorkItem?.cancel()
         let item = DispatchWorkItem { [weak self] in
             guard let self = self else { return }
-            _ = self.finalizeCurrentSessionIfActive()
+            _ = self.finalizeCurrentSessionIfActive(isIdleTimeout: true)
         }
         idleFinalizeWorkItem = item
         let timeout = sessionIdleTimeoutSeconds
@@ -512,7 +596,7 @@ public final class SessionBillingManager: @unchecked Sendable {
     public func currentOrLatestBill() -> UsageSessionBill? {
         lock.lock()
         if let sid = activeSessionId, let start = sessionStartDate {
-            let end = lastActivityDate ?? Date()
+            let end = Date()
             let duration = max(Double(cumulativeExecutionMs) / 1000.0, end.timeIntervalSince(start))
             let totalTok = cumulativeInputTokens + cumulativeOutputTokens
             let cost = Self.computeCostUSD(
@@ -525,10 +609,12 @@ public final class SessionBillingManager: @unchecked Sendable {
                 outputTokens: cumulativeSavedTokens / 2,
                 modelName: currentOperator.modelName
             )
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
             let bill = UsageSessionBill(
                 billId: sid,
-                startTime: ISO8601DateFormatter().string(from: start),
-                endTime: ISO8601DateFormatter().string(from: end),
+                startTime: formatter.string(from: start),
+                endTime: formatter.string(from: end),
                 agentName: currentOperator.agentName,
                 modelName: currentOperator.modelName,
                 targetApps: activeTargetApps,
@@ -551,12 +637,12 @@ public final class SessionBillingManager: @unchecked Sendable {
         return recentBills(limit: 1).last
     }
 
-    /// Finalizes the active session into a persisted `UsageSessionBill`, writes it to `~/.opencomputeruse/bills.jsonl`,
-    /// and notifies the HUD to display the visual Session Bill Receipt card.
+    /// Finalizes the active session into a persisted `UsageSessionBill` and writes it to `~/.opencomputeruse/bills.jsonl`.
     @discardableResult
     public func finalizeCurrentSessionIfActive(
         explicitInputTokens: Int? = nil,
-        explicitOutputTokens: Int? = nil
+        explicitOutputTokens: Int? = nil,
+        isIdleTimeout: Bool = false
     ) -> UsageSessionBill? {
         lock.lock()
         idleFinalizeWorkItem?.cancel()
@@ -567,11 +653,11 @@ public final class SessionBillingManager: @unchecked Sendable {
             return nil
         }
 
-        let end = Date()
-        let wallSec = end.timeIntervalSince(start)
+        // If finalized explicitly via `ocu bill --finish`, measure up to `Date()` (including final Agent verification).
+        // If finalized via idle timeout, measure up to `lastActivityDate` (start of step 1 -> completion of step N, including all LLM thinking intervals between steps).
+        let effectiveEnd = isIdleTimeout ? (lastActivityDate ?? Date()) : Date()
         let activeSec = Double(cumulativeExecutionMs) / 1000.0
-        // If finalized via idle timer, subtract the idle wait window so duration reflects true usage time
-        let adjustedWallSec = wallSec > sessionIdleTimeoutSeconds ? max(activeSec, wallSec - sessionIdleTimeoutSeconds + 0.3) : max(activeSec, wallSec)
+        let totalWallSec = max(activeSec, effectiveEnd.timeIntervalSince(start))
 
         let inTok = explicitInputTokens ?? cumulativeInputTokens
         let outTok = explicitOutputTokens ?? cumulativeOutputTokens
@@ -593,12 +679,12 @@ public final class SessionBillingManager: @unchecked Sendable {
         let completedBill = UsageSessionBill(
             billId: sid,
             startTime: formatter.string(from: start),
-            endTime: formatter.string(from: end),
+            endTime: formatter.string(from: effectiveEnd),
             agentName: currentOperator.agentName,
             modelName: currentOperator.modelName,
             targetApps: activeTargetApps,
             actionCount: activeSteps.count,
-            totalDurationSeconds: adjustedWallSec,
+            totalDurationSeconds: totalWallSec,
             activeExecutionMs: cumulativeExecutionMs,
             inputTokens: inTok,
             outputTokens: outTok,

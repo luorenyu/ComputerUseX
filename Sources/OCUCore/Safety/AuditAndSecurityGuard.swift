@@ -42,6 +42,14 @@ public struct OCUSecurityConfig: Codable, Sendable {
     public var autoPostActionDiff: Bool
     public var interactiveAppConsent: Bool
 
+    public static let defaultAllowedApps: [String] = [
+        "WeChat",
+        "iPhone Mirroring",
+        "Google Chrome",
+        "Android Studio",
+        "Safari"
+    ]
+
     public static let defaultBlockedApps: [String] = [
         "1Password",
         "Keychain Access",
@@ -54,7 +62,7 @@ public struct OCUSecurityConfig: Codable, Sendable {
     ]
 
     public init(
-        allowedApps: [String] = [],
+        allowedApps: [String] = Self.defaultAllowedApps,
         blockedApps: [String] = Self.defaultBlockedApps,
         auditLoggingEnabled: Bool = true,
         autoPostActionDiff: Bool = true,
@@ -221,6 +229,26 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             details: "Saved to \(configFileURL.path)",
             elapsedMs: 2
         )
+    }
+
+    public func removeAllowedApp(_ appName: String) {
+        var cfg = loadConfig()
+        let lower = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        cfg.allowedApps.removeAll { $0.lowercased() == lower }
+        lock.lock()
+        sessionApprovedApps.remove(lower)
+        lock.unlock()
+        saveConfig(cfg)
+    }
+
+    public func removeBlockedApp(_ appName: String) {
+        var cfg = loadConfig()
+        let lower = appName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        cfg.blockedApps.removeAll { $0.lowercased() == lower }
+        lock.lock()
+        sessionDeniedApps.remove(lower)
+        lock.unlock()
+        saveConfig(cfg)
     }
 
     /// Displays a native macOS modal authorization dialog on first access to an unapproved application.

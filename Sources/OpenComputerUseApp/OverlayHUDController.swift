@@ -16,7 +16,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
     @Published public var showBorderGlow: Bool = false
     @Published public var pillTitle: String? = nil
     @Published public var pillSubtitle: String? = nil
-    @Published public var operatorBadgeText: String = "🤖 Antigravity · Gemini 2.5 Pro"
+    @Published public var operatorBadgeText: String = "🤖 Antigravity · Gemini 4 Argon Medium"
     @Published public var trailPoints: [ScreenPoint] = []
     @Published public var highlightRect: ScreenRect? = nil
     @Published public var highlightLabel: String? = nil
@@ -65,6 +65,14 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
 
             case .statusPill(let title, let subtitle):
+                if title == "__OPEN_DASHBOARD_CONTROL__" {
+                    MainDashboardWindowController.shared.showWindow(section: .control)
+                    return
+                }
+                if title == "__OPEN_DASHBOARD_HISTORY__" {
+                    MainDashboardWindowController.shared.showWindow(section: .history)
+                    return
+                }
                 MiniPreviewWindowController.shared.updateStatus(title)
                 if self.isTargetInBackground {
                     self.showBorderGlow = false
@@ -172,9 +180,15 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     totalTokens: totalTokens,
                     costUSD: costUSD
                 )
+                MainDashboardWindowController.shared.refreshData()
 
             case .sessionBillCompleted(let bill):
-                SessionBillWindowController.shared.presentCompletedBill(bill)
+                // Silently record the completed bill without popping up the bottom-right floating bill receipt,
+                // and close the Mini PiP preview window now that the task session is truly complete.
+                SessionBillWindowController.shared.recordCompletedBillSilently(bill)
+                MiniPreviewWindowController.shared.completeAndHidePreview()
+                VirtualCursorWindowController.shared.hideCursor()
+                MainDashboardWindowController.shared.refreshData()
 
             case .clear:
                 withAnimation(.easeOut(duration: 0.2)) {

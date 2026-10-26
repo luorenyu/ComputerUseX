@@ -5,8 +5,17 @@ struct OCUCLI {
     static let version = "1.0.0"
 
     static func main() {
-        let args = Array(CommandLine.arguments.dropFirst())
-        guard let first = args.first else {
+        var rawArgs = Array(CommandLine.arguments.dropFirst())
+        var leadingFlags: [String] = []
+        // Allow global flags like --agent <name> or --model <name> before the subcommand
+        while let firstToken = rawArgs.first, firstToken.hasPrefix("--") && firstToken != "--help" && firstToken != "--version" {
+            leadingFlags.append(rawArgs.removeFirst())
+            if let nextVal = rawArgs.first, !nextVal.hasPrefix("-") {
+                leadingFlags.append(rawArgs.removeFirst())
+            }
+        }
+
+        guard let first = rawArgs.first else {
             printHelp()
             return
         }
@@ -22,13 +31,13 @@ struct OCUCLI {
             MCPServer.shared.runStdioLoop()
             return
         case "doctor":
-            runDoctor(jsonOutput: args.contains("--json"))
+            runDoctor(jsonOutput: rawArgs.contains("--json") || leadingFlags.contains("--json"))
             return
         default:
             break
         }
 
-        let subArgs = Array(args.dropFirst())
+        let subArgs = Array(rawArgs.dropFirst()) + leadingFlags
         let jsonOutput = subArgs.contains("--json")
         let req = parseSubcommand(command: first, args: subArgs)
         let resp = UnixSocketIPC.executeRoutingThroughDaemonIfAvailable(req)
@@ -121,9 +130,10 @@ struct OCUCLI {
             }
         }
 
-        switch command {
-        case "status":
-            return IPCRequest(command: "status")
+        var req: IPCRequest = {
+            switch command {
+            case "status":
+                return IPCRequest(command: "status")
 
         case "reset":
             return IPCRequest(command: "reset_safety")
@@ -261,11 +271,19 @@ struct OCUCLI {
                 role: subAction
             )
 
+        case "dashboard", "open":
+            return IPCRequest(
+                command: "dashboard",
+                role: flags["tab"] ?? flags["section"] ?? positional.first ?? "control",
+                agentName: flags["agent"],
+                modelName: flags["model"]
+            )
+
         case "bill":
             return IPCRequest(
                 command: "bill",
                 submit: boolFlags.contains("finish") || (positional.first == "finish"),
-                focus: boolFlags.contains("show") || !boolFlags.contains("no-show"),
+                focus: boolFlags.contains("show"),
                 agentName: flags["agent"],
                 modelName: flags["model"]
             )
@@ -407,8 +425,16 @@ struct OCUCLI {
             )
 
         default:
-            return IPCRequest(command: command)
+            return IPCRequest(
+                command: command,
+                agentName: flags["agent"],
+                modelName: flags["model"]
+            )
         }
+        }()
+        if req.agentName == nil { req.agentName = flags["agent"] }
+        if req.modelName == nil { req.modelName = flags["model"] }
+        return req
     }
 
     static func renderHumanReadable(_ resp: IPCResponse, compact: Bool = false) {
@@ -445,7 +471,7 @@ struct OCUCLI {
         if let bills = resp.bills, !bills.isEmpty {
             print("🧾 Recent OpenComputerUse Session Bills (\(bills.count)):")
             for b in bills {
-                print(" • [#\(b.billId)] \(b.endTime) | 🤖 \(b.agentName) (\(b.modelName)) | ⏱️ \(String(format: "%.1fs", b.totalDurationSeconds)) (\(b.actionCount) steps) | 📊 \(b.totalTokens) tok (省 \(b.savedTokens) tok) | 💵 $\(String(format: "%.5f", b.costUSD))")
+                print(" • [#\(b.billId)] \(b.endTime) | 🤖 \(b.agentName) (\(b.modelName)) | ⏱️ \(b.formattedDurationCompact) | 📊 \(b.totalTokens) tok | 💵 $\(String(format: "%.5f", b.costUSD))")
             }
             if let latest = resp.bill {
                 print("")

@@ -224,12 +224,12 @@ final class OCUCoreTests: XCTestCase {
         // Test SessionBillingManager operator detection & billing receipt
         let op = SessionBillingManager.shared.detectCurrentOperator(
             explicitAgent: "Antigravity",
-            explicitModel: "gemini-2.5-pro"
+            explicitModel: "Gemini 4 Argon Medium"
         )
         XCTAssertEqual(op.agentName, "Antigravity")
-        XCTAssertEqual(op.modelName, "gemini-2.5-pro")
+        XCTAssertEqual(op.modelName, "Gemini 4 Argon Medium")
 
-        let req = IPCRequest(command: "click", target: "@e1", agentName: "Antigravity", modelName: "gemini-2.5-pro")
+        let req = IPCRequest(command: "click", target: "@e1", agentName: "Antigravity", modelName: "Gemini 4 Argon Medium")
         let resp = IPCResponse(
             id: req.id,
             ok: true,
@@ -239,7 +239,7 @@ final class OCUCoreTests: XCTestCase {
         let finalized = SessionBillingManager.shared.finalizeCurrentSessionIfActive()
         XCTAssertNotNil(finalized)
         XCTAssertEqual(finalized?.agentName, "Antigravity")
-        XCTAssertEqual(finalized?.modelName, "gemini-2.5-pro")
+        XCTAssertEqual(finalized?.modelName, "Gemini 4 Argon Medium")
         XCTAssertGreaterThan(finalized?.totalTokens ?? 0, 100)
         XCTAssertGreaterThan(finalized?.costUSD ?? 0, 0.0)
         XCTAssertTrue(finalized?.formatReceiptText().contains("OpenComputerUse 使用账单明细") == true)

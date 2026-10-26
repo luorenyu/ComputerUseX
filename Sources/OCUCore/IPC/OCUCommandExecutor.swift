@@ -6,6 +6,12 @@ public final class OCUCommandExecutor: @unchecked Sendable {
     private init() {}
 
     public func execute(_ request: IPCRequest, isDaemonContext: Bool = false) -> IPCResponse {
+        if request.agentName != nil || request.modelName != nil {
+            _ = SessionBillingManager.shared.detectCurrentOperator(
+                explicitAgent: request.agentName,
+                explicitModel: request.modelName
+            )
+        }
         let startTime = Date()
         let response = executeCore(request, isDaemonContext: isDaemonContext)
         let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -502,10 +508,27 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     return IPCResponse(id: request.id, ok: true, outcome: out)
                 }
 
+            case "dashboard", "open":
+                let secToken = (request.role ?? request.target ?? "control").lowercased()
+                let marker = (secToken.contains("history") || secToken.contains("bill")) ? "__OPEN_DASHBOARD_HISTORY__" : "__OPEN_DASHBOARD_CONTROL__"
+                KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: marker, subtitle: nil))
+                return IPCResponse(
+                    id: request.id,
+                    ok: true,
+                    outcome: ActionOutcome(
+                        action: "dashboard",
+                        targetDescription: "Opened OpenComputerUse Main Control Center Window (\(secToken))",
+                        elapsedMs: 5
+                    )
+                )
+
             case "bill", "bills", "session_finish":
                 if request.submit == true || request.command == "session_finish" {
                     if let finalized = SessionBillingManager.shared.finalizeCurrentSessionIfActive() {
                         return IPCResponse(id: request.id, ok: true, bill: finalized)
+                    } else if let latest = SessionBillingManager.shared.currentOrLatestBill() {
+                        KillSwitchMonitor.shared.emitHUDEvent(.sessionBillCompleted(latest))
+                        return IPCResponse(id: request.id, ok: true, bill: latest)
                     }
                 }
                 if request.command == "bills" {
@@ -514,7 +537,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 }
                 if let current = SessionBillingManager.shared.currentOrLatestBill() {
                     if request.focus == true {
-                        KillSwitchMonitor.shared.emitHUDEvent(.sessionBillCompleted(current))
+                        KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "__OPEN_DASHBOARD_HISTORY__", subtitle: nil))
                     }
                     return IPCResponse(id: request.id, ok: true, bill: current)
                 } else {

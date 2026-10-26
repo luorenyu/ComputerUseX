@@ -32,6 +32,29 @@ public final class MouseController: @unchecked Sendable {
         return nil
     }
 
+    private func resolveEffectivePreferredTarget(
+        at point: ScreenPoint,
+        explicitPid: Int32? = nil,
+        explicitApp: String? = nil
+    ) -> (pid: Int32?, appName: String?) {
+        if explicitPid != nil || (explicitApp != nil && !explicitApp!.isEmpty) {
+            return (explicitPid, explicitApp)
+        }
+        if let snap = ElementSnapshotStore.shared.currentSnapshot(),
+           snap.activePid > 0,
+           snap.screenBounds.contains(point) {
+            return (snap.activePid, snap.activeApp)
+        }
+        stateLock.lock()
+        let savedPid = lastTargetPid
+        let savedBounds = lastTargetWindowBounds
+        stateLock.unlock()
+        if let pid = savedPid, let bounds = savedBounds, bounds.contains(point) {
+            return (pid, nil)
+        }
+        return (nil, nil)
+    }
+
     public func moveSmoothly(
         to destination: ScreenPoint,
         duration: TimeInterval = 0.18,
@@ -44,9 +67,14 @@ public final class MouseController: @unchecked Sendable {
         if isVirtual {
             try KillSwitchMonitor.shared.verifySafeToProceed()
             let start = currentVirtualOrPhysicalLocation
-            let resolvedWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(at: destination, preferredPid: pid)
+            let pref = resolveEffectivePreferredTarget(at: destination, explicitPid: pid)
+            let resolvedWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(
+                at: destination,
+                preferredPid: pref.pid,
+                preferredAppName: pref.appName
+            )
             let effWinID = windowID ?? resolvedWin?.windowID
-            let effPid = pid ?? resolvedWin?.pid
+            let effPid = pref.pid ?? resolvedWin?.pid
             let distance = start.distance(to: destination)
 
             stateLock.lock()
@@ -176,10 +204,15 @@ public final class MouseController: @unchecked Sendable {
             targetDesc = "current (\(Int(targetPoint.x)), \(Int(targetPoint.y)))"
         }
 
+        let pref = resolveEffectivePreferredTarget(
+            at: targetPoint,
+            explicitPid: resolvedElement?.pid,
+            explicitApp: resolvedElement?.appName
+        )
         let winContext = SyntheticFocusEnforcer.shared.resolveTargetWindow(
             at: targetPoint,
-            preferredPid: resolvedElement?.pid,
-            preferredAppName: resolvedElement?.appName
+            preferredPid: pref.pid,
+            preferredAppName: pref.appName
         )
         if let wc = winContext {
             stateLock.lock()
@@ -465,10 +498,15 @@ public final class MouseController: @unchecked Sendable {
         }
 
         let scrollPoint = targetPoint ?? currentVirtualOrPhysicalLocation
+        let pref = resolveEffectivePreferredTarget(
+            at: scrollPoint,
+            explicitPid: preferredPid,
+            explicitApp: preferredApp
+        )
         let winContext = SyntheticFocusEnforcer.shared.resolveTargetWindow(
             at: scrollPoint,
-            preferredPid: preferredPid,
-            preferredAppName: preferredApp
+            preferredPid: pref.pid,
+            preferredAppName: pref.appName
         )
 
         if let pt = targetPoint {

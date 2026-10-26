@@ -187,128 +187,94 @@ struct OpenComputerUseMenuBarApp: App {
 
                     if let lastBill = billViewModel.currentBill {
                         HStack {
-                            Text("⏱️ \(String(format: "%.1fs", lastBill.totalDurationSeconds)) (\(lastBill.actionCount)步)")
-                                .font(.system(size: 11, design: .monospaced))
+                            Text("⏱️ \(lastBill.formattedDurationCompact)")
+                                .font(.system(size: 10.5, design: .monospaced))
                             Spacer()
                             Text("📊 \(lastBill.totalTokens) tok")
-                                .font(.system(size: 11, design: .monospaced))
+                                .font(.system(size: 10.5, design: .monospaced))
                             Spacer()
                             Text(String(format: "💵 $%.5f", lastBill.costUSD))
-                                .font(.system(size: 11, weight: .bold, design: .monospaced))
+                                .font(.system(size: 10.5, weight: .bold, design: .monospaced))
                                 .foregroundColor(.green)
                         }
-                        Button("🧾 弹出完整使用账单卡片 (#\(lastBill.billId))") {
-                            SessionBillWindowController.shared.presentCompletedBill(lastBill, autoHideSeconds: 12.0)
-                        }
-                        .font(.caption)
                     }
                 }
                 .padding(8)
                 .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
 
+                // Primary Action: Open Main Dashboard Window ("电脑操控中心")
+                Button(action: {
+                    MainDashboardWindowController.shared.showWindow(section: .control)
+                }) {
+                    HStack {
+                        Image(systemName: "macwindow.badge.plus")
+                            .foregroundColor(.cyan)
+                        Text("打开电脑操控中心 (授权应用管理)")
+                            .font(.system(size: 12.5, weight: .semibold))
+                        Spacer()
+                        Image(systemName: "arrow.up.right.square")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.cyan.opacity(0.14)))
+                }
+                .buttonStyle(.plain)
+
+                Button(action: {
+                    MainDashboardWindowController.shared.showWindow(section: .history)
+                }) {
+                    HStack {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .foregroundColor(.green)
+                        Text("查看调用历史与消费账单明细")
+                            .font(.system(size: 12, weight: .medium))
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                }
+                .buttonStyle(.plain)
+
                 Divider()
 
                 // Permissions Section
-                Text("系统权限状态 (macOS TCC)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
                 HStack {
-                    Text(coordinator.accessibilityGranted ? "✅ 辅助功能 (Accessibility)" : "⚠️ 辅助功能未授权")
-                        .font(.system(size: 12))
+                    Text(coordinator.accessibilityGranted ? "✅ 辅助功能已就绪" : "⚠️ 辅助功能未授权")
+                        .font(.system(size: 11.5))
                     Spacer()
-                    if !coordinator.accessibilityGranted {
-                        Button("重置重授") {
-                            coordinator.resetAndPromptAccessibility()
-                        }
-                        .font(.caption)
-                        .help("当重新编译导致 macOS TCC 签名缓存失效时，一键清除旧签名记录并重新弹窗授权")
-
-                        Button("去授权") {
-                            _ = PermissionManager.shared.isAccessibilityGranted(prompt: true)
-                            PermissionManager.shared.openAccessibilitySettings()
-                        }
-                        .font(.caption)
-                    }
+                    Text(coordinator.screenRecordingGranted ? "✅ 屏幕录制已就绪" : "⚠️ 录屏未授权")
+                        .font(.system(size: 11.5))
                 }
-
-                HStack {
-                    Text(coordinator.screenRecordingGranted ? "✅ 屏幕录制 (Vision OCR/SoM)" : "⚠️ 屏幕录制未授权")
-                        .font(.system(size: 12))
-                    Spacer()
-                    if !coordinator.screenRecordingGranted {
-                        Button("重置重授") {
-                            coordinator.resetAndPromptScreenRecording()
+                if !coordinator.accessibilityGranted || !coordinator.screenRecordingGranted {
+                    HStack(spacing: 8) {
+                        if !coordinator.accessibilityGranted {
+                            Button("修复辅助功能") {
+                                coordinator.resetAndPromptAccessibility()
+                            }
+                            .font(.caption)
                         }
-                        .font(.caption)
-                        .help("清除旧签名录屏权限记录并重新弹窗授权")
-
-                        Button("去授权") {
-                            _ = PermissionManager.shared.isScreenRecordingGranted(prompt: true)
-                            PermissionManager.shared.openScreenRecordingSettings()
+                        if !coordinator.screenRecordingGranted {
+                            Button("修复录屏权限") {
+                                coordinator.resetAndPromptScreenRecording()
+                            }
+                            .font(.caption)
+                            Button("重启生效") {
+                                coordinator.relaunchApp()
+                            }
+                            .font(.caption)
                         }
-                        .font(.caption)
-
-                        Button("重启生效") {
-                            coordinator.relaunchApp()
-                        }
-                        .font(.caption)
-                        .help("macOS 录屏权限开启后需重启进程刷新状态")
                     }
                 }
 
                 Divider()
 
-                // Controls & Safety
-                Toggle("开启独立虚拟鼠标 (Codex 后台模式)", isOn: Binding(
-                    get: { coordinator.virtualCursorMode },
-                    set: { val in
-                        coordinator.virtualCursorMode = val
-                        MouseController.shared.useVirtualCursorByDefault = val
-                        if !val {
-                            VirtualCursorWindowController.shared.hideCursor()
-                        }
-                    }
-                ))
-                .font(.system(size: 12))
-
-                Toggle("开启后台小窗实时预览 (Codex PiP 模式)", isOn: Binding(
-                    get: { coordinator.miniPiPPreviewMode },
-                    set: { val in
-                        coordinator.miniPiPPreviewMode = val
-                        MiniPreviewWindowController.shared.viewModel.isEnabled = val
-                        if !val {
-                            MiniPreviewWindowController.shared.hidePreview()
-                        }
-                    }
-                ))
-                .font(.system(size: 12))
-
-                Toggle("开启全屏流光与鼠标轨迹 HUD", isOn: $hudViewModel.isHUDEnabled)
-                    .font(.system(size: 12))
-
-                Toggle("人工晃动鼠标自动接管保护", isOn: Binding(
-                    get: { coordinator.humanTakeoverGuard },
-                    set: { val in
-                        coordinator.humanTakeoverGuard = val
-                        KillSwitchMonitor.shared.humanTakeoverEnabled = val
-                    }
-                ))
-                .font(.system(size: 12))
-
-                Toggle("首次操作未知 App 弹窗授权确认", isOn: Binding(
-                    get: { coordinator.interactiveAppConsent },
-                    set: { val in
-                        coordinator.interactiveAppConsent = val
-                        AuditAndSecurityGuard.shared.setInteractiveConsentEnabled(val)
-                    }
-                ))
-                .font(.system(size: 12))
-
                 HStack(spacing: 8) {
-                    Button("✨ 播放 HUD 视觉演示") {
-                        coordinator.runVisualHUDDemo()
-                    }
                     if coordinator.killSwitchTripped {
                         Button("🟢 重置急停 (Reset)") {
                             KillSwitchMonitor.shared.reset()
@@ -320,35 +286,20 @@ struct OpenComputerUseMenuBarApp: App {
                             coordinator.refreshPermissions()
                         }
                     }
-                }
 
-                Button("📋 一键复制 MCP Server 配置 JSON") {
-                    coordinator.copyMCPConfigToClipboard()
-                }
+                    Spacer()
 
-                if !hudViewModel.recentLogs.isEmpty {
-                    Divider()
-                    Text("最近 Agent 动作记录")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    ForEach(hudViewModel.recentLogs.prefix(6), id: \.self) { log in
-                        Text(log)
-                            .font(.system(size: 11, design: .monospaced))
-                            .lineLimit(1)
+                    Button("退出") {
+                        NSApplication.shared.terminate(nil)
                     }
+                    .keyboardShortcut("q")
                 }
-
-                Divider()
-
-                Button("退出 OpenComputerUse") {
-                    NSApplication.shared.terminate(nil)
-                }
-                .keyboardShortcut("q")
             }
             .padding(12)
-            .frame(width: 320)
+            .frame(width: 310)
             .onAppear {
                 coordinator.refreshPermissions()
+                billViewModel.refreshFromDisk()
             }
         }
         .menuBarExtraStyle(.window)
