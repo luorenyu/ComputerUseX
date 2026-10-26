@@ -74,6 +74,9 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     return
                 }
                 let cleanedTitle = GeminiPalette.cleanStatusText(title)
+                if cleanedTitle.contains("视觉引擎演示") {
+                    MiniPreviewWindowController.shared.viewModel.targetWindowID = 0
+                }
                 MiniPreviewWindowController.shared.updateStatus(cleanedTitle)
                 if self.isTargetInBackground {
                     self.showBorderGlow = false

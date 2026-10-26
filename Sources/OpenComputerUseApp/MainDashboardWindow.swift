@@ -125,8 +125,28 @@ public final class MainDashboardWindowController: @unchecked Sendable {
 
     private init() {}
 
+    public func dismissMenuBarPopup() {
+        for win in NSApp.windows {
+            if win === self.window { continue }
+            let className = String(describing: type(of: win)).lowercased()
+            let isMenuPopup = className.contains("menubar")
+                || className.contains("statusbar")
+                || className.contains("popup")
+                || className.contains("popover")
+                || win.level == .popUpMenu
+                || win.level == .statusBar
+                || (win === NSApp.keyWindow && !win.styleMask.contains(.titled))
+            if isMenuPopup && win.isVisible {
+                win.orderOut(nil)
+                win.close()
+            }
+        }
+    }
+
     public func showWindow(section: DashboardSection? = nil) {
         DispatchQueue.main.async {
+            self.dismissMenuBarPopup()
+
             if let sec = section {
                 self.viewModel.selectedSection = sec
             }
@@ -350,6 +370,34 @@ struct MainDashboardRootView: View {
 
                     Spacer()
 
+                    // Demo Showcase Button in Main Settings Window
+                    Button(action: {
+                        DaemonAppCoordinator.shared.runVisualHUDDemo()
+                    }) {
+                        HStack(spacing: 6) {
+                            GeminiSparkleIcon(size: 13, showHalo: false)
+                            Image(systemName: "play.fill")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(GeminiPalette.textSkyBright)
+                            Text("演示效果 (Demo)")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(.white)
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(
+                            ZStack {
+                                Capsule()
+                                    .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.28))
+                                Capsule()
+                                    .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.75), lineWidth: 1)
+                            }
+                        )
+                        .shadow(color: GeminiPalette.blue.opacity(0.32), radius: 8, y: 1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("演示 Google Gemini 极光光晕、统一流光指针与平滑贝塞尔轨迹")
+
                     Button(action: {
                         viewModel.refresh()
                     }) {
@@ -359,13 +407,13 @@ struct MainDashboardRootView: View {
                             Text("刷新")
                                 .font(.system(size: 12, weight: .medium))
                         }
-                        .foregroundColor(.white.opacity(0.82))
+                        .foregroundColor(.white.opacity(0.88))
                         .padding(.horizontal, 13)
                         .padding(.vertical, 7)
                         .background(
                             Capsule()
                                 .fill(GeminiPalette.surfaceCard)
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
                         )
                     }
                     .buttonStyle(.plain)

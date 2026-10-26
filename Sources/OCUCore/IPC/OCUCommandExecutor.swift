@@ -610,33 +610,66 @@ public final class OCUCommandExecutor: @unchecked Sendable {
         let startTime = Date()
         let bounds = PermissionManager.shared.mainScreenBounds()
         let center = bounds.center
-        let p1 = ScreenPoint(x: center.x - 180, y: center.y - 90)
-        let p2 = ScreenPoint(x: center.x + 180, y: center.y - 60)
-        let p3 = ScreenPoint(x: center.x, y: center.y + 110)
+        let p0 = ScreenPoint(x: center.x - 240, y: center.y + 80)
+        let p1 = ScreenPoint(x: center.x - 170, y: center.y - 95)
+        let p2 = ScreenPoint(x: center.x + 185, y: center.y - 65)
+        let p3 = ScreenPoint(x: center.x + 10, y: center.y + 115)
 
         KillSwitchMonitor.shared.reset()
+        KillSwitchMonitor.shared.emitHUDEvent(
+            .statusPill(title: "OpenComputerUse 视觉引擎演示", subtitle: "Gemini 极光光晕 + 统一流光指针 + 贝塞尔平滑轨迹")
+        )
         KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
-        KillSwitchMonitor.shared.emitHUDEvent(
-            .statusPill(title: "✨ OpenComputerUse 视觉引擎演示", subtitle: "三次贝塞尔平滑轨迹 + 元素高亮 + 波纹反馈")
-        )
 
-        let demoBox = ScreenRect(x: p1.x - 70, y: p1.y - 22, width: 140, height: 44)
-        KillSwitchMonitor.shared.emitHUDEvent(.highlightElement(rect: demoBox, label: "@e1 [演示按钮]"))
-        try MouseController.shared.moveSmoothly(to: p1, duration: 0.28)
+        // Animate unified Gemini virtual cursor on foreground desktop (windowID: 0)
+        func animateDemoPointer(from start: ScreenPoint, to end: ScreenPoint, duration: TimeInterval) throws {
+            let steps = 20
+            let pts = CubicBezierTrajectory.sample(from: start, to: end, steps: steps)
+            let dt = max(0.008, duration / Double(pts.count))
+            var prev = start
+            for pt in pts {
+                try KillSwitchMonitor.shared.verifySafeToProceed()
+                let vx = pt.x - prev.x
+                let tilt = max(-18.0, min(18.0, vx * 0.45))
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorMove(point: pt, windowID: 0, pid: 0, tiltAngle: tilt, label: nil)
+                )
+                prev = pt
+                Thread.sleep(forTimeInterval: dt)
+            }
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .virtualCursorMove(point: end, windowID: 0, pid: 0, tiltAngle: 0.0, label: nil)
+            )
+        }
+
+        let demoBox = ScreenRect(x: p1.x - 75, y: p1.y - 24, width: 150, height: 48)
+        KillSwitchMonitor.shared.emitHUDEvent(.highlightElement(rect: demoBox, label: nil))
+        try animateDemoPointer(from: p0, to: p1, duration: 0.34)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p1, windowID: 0, isPressed: true))
         KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: p1, button: .left, clickCount: 1))
-        Thread.sleep(forTimeInterval: 0.22)
+        Thread.sleep(forTimeInterval: 0.12)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p1, windowID: 0, isPressed: false))
+        Thread.sleep(forTimeInterval: 0.18)
 
-        let demoBox2 = ScreenRect(x: p2.x - 80, y: p2.y - 22, width: 160, height: 44)
-        KillSwitchMonitor.shared.emitHUDEvent(.highlightElement(rect: demoBox2, label: "@e2 [搜索输入框]"))
-        try MouseController.shared.moveSmoothly(to: p2, duration: 0.28)
+        let demoBox2 = ScreenRect(x: p2.x - 85, y: p2.y - 24, width: 170, height: 48)
+        KillSwitchMonitor.shared.emitHUDEvent(.highlightElement(rect: demoBox2, label: nil))
+        try animateDemoPointer(from: p1, to: p2, duration: 0.36)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p2, windowID: 0, isPressed: true))
         KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: p2, button: .right, clickCount: 1))
-        Thread.sleep(forTimeInterval: 0.22)
+        Thread.sleep(forTimeInterval: 0.12)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p2, windowID: 0, isPressed: false))
+        Thread.sleep(forTimeInterval: 0.18)
 
-        try MouseController.shared.moveSmoothly(to: p3, duration: 0.25)
+        try animateDemoPointer(from: p2, to: p3, duration: 0.32)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p3, windowID: 0, isPressed: true))
         KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: p3, button: .left, clickCount: 2))
+        Thread.sleep(forTimeInterval: 0.14)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: p3, windowID: 0, isPressed: false))
         KillSwitchMonitor.shared.emitHUDEvent(
-            .statusPill(title: "✅ HUD 视觉演示完成", subtitle: "按下 Option+Esc 可随时急停")
+            .statusPill(title: "HUD 视觉演示完成", subtitle: "按下 Option+Esc 可随时急停")
         )
+        Thread.sleep(forTimeInterval: 0.35)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorHide)
 
         return ActionOutcome(
             action: "hud_demo",
