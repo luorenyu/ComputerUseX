@@ -4,7 +4,7 @@
 
 [English](./README.md) | [简体中文](./README_CN.md) | [Security Policy](./SECURITY.md) | [Contributing](./CONTRIBUTING.md) | [Changelog](./CHANGELOG.md)
 
-`ComputerUseX` (`cux`) is a native Swift 6 (zero external dependencies) desktop perception and GUI automation toolkit built for **OpenAI Codex, Claude Code, Claude Desktop, Cursor, Antigravity, and Windsurf**.
+`ComputerUseX` (`cux`) is a native Swift 6 (zero external dependencies) desktop perception and GUI automation toolkit built for **OpenAI Codex, Claude Code / Desktop, OpenClaw, OpenCode, Pi, MiniMaxCode, Harness, Cursor, Windsurf, and Antigravity**.
 
 It bridges AI Agents to desktop applications by combining macOS Accessibility trees (`AXUIElement`), on-device Apple `Vision` OCR, Set-of-Marks (`SoM`) visual grounding, and background event synthesis (`AXPress` / `CGEvent.postToPid`), allowing Agents to inspect and operate desktop apps without hijacking your physical mouse or foreground window focus.
 
@@ -23,11 +23,19 @@ cd ComputerUseX
 ./scripts/install.sh
 ```
 
-What the installer configures automatically:
-- Installs `/Applications/ComputerUseX.app` (MenuBar daemon, Control Center & Live PiP preview).
-- Links the `cux` binary to `~/.local/bin/cux` (and `/usr/local/bin/cux` if writable).
-- Registers the **OpenAI Codex** native plugin (`~/.codex/plugins/cache/...`), skill (`~/.codex/skills/computer-use-x`), and MCP entry (`~/.codex/config.toml`).
-- Registers the `computer-use-x` MCP server in **Claude Code / Desktop**, **Cursor**, and **Antigravity / Gemini**.
+The installer (or `cux install-mcp [all|codex|claude|openclaw|opencode|pi|minimax|harness|cursor|windsurf|gemini]`) automatically detects and configures your installed AI Agents:
+
+| Supported AI Agent | Auto-Registered MCP Config | Auto-Installed Plugin / Skill Path |
+| :--- | :--- | :--- |
+| **OpenAI Codex** | `~/.codex/config.toml` | `~/.codex/plugins/cache/computer-use-x/...`<br/>`~/.codex/skills/computer-use-x/SKILL.md` |
+| **Claude Code / Desktop** | `~/.claude.json`<br/>`~/Library/Application Support/Claude/claude_desktop_config.json` | `~/.claude/skills/computer-use-x/SKILL.md` |
+| **OpenClaw** | `~/.openclaw/openclaw.json` (`mcp.servers`) | `~/.openclaw/skills/computer-use-x/SKILL.md` |
+| **OpenCode** | `~/.config/opencode/opencode.json` (`mcp`) | `~/.config/opencode/skills/computer-use-x/SKILL.md` |
+| **Pi (`pi-coding-agent`)** | `~/.pi/agent/mcp.json` | `~/.pi/agent/skills/computer-use-x/SKILL.md` |
+| **MiniMaxCode (`mmx`)** | `~/.minimax-code/mcp.json` | `~/.minimax-code/skills/computer-use-x/SKILL.md` |
+| **Harness / Hermes** | `~/.harness/mcp.json`<br/>`~/.hermes/config.yaml` | `~/.harness/skills/computer-use-x/SKILL.md` |
+| **Cursor / Windsurf** | `~/.cursor/mcp.json`<br/>`~/.codeium/windsurf/mcp_config.json` | Global `~/.agents/skills/computer-use-x/SKILL.md` |
+| **Antigravity / Gemini** | `~/.gemini/settings.json`<br/>`~/.gemini/antigravity/mcp_config.json` | Global `~/.agents/skills/computer-use-x/SKILL.md` |
 
 ### 2. Grant Permissions & Launch Companion App
 ```bash

@@ -338,7 +338,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
         }
     }
 
-    /// One-line MCP configuration installer for Claude Code, Codex, Gemini CLI, and Cursor.
+    /// One-line MCP & Skill configuration installer for Claude Code/Desktop, Codex, Gemini/Antigravity, Cursor, Windsurf, OpenClaw, OpenCode, Pi, MiniMaxCode, and Harness.
     public func installMCPConfiguration(target: String = "all", binaryPath: String? = nil) throws -> ActionOutcome {
         let resolvedBin: String = {
             if let custom = binaryPath, !custom.isEmpty { return custom }
@@ -352,6 +352,40 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let lowerTarget = target.lowercased()
         var updatedPaths: [String] = []
+
+        func buildSkillMarkdown(forAgent agentLabel: String) -> String {
+            return """
+            ---
+            name: computer-use-x
+            description: "Controls macOS GUI applications and desktop interfaces in the background without stealing mouse focus using ComputerUseX (`cux`) hybrid perception (AXUIElement + Apple Vision OCR + SoM), persistent Live PiP preview window, and session billing."
+            disable-model-invocation: false
+            ---
+
+            # ComputerUseX (`cux`) — Zero-Focus Desktop Computer Use Skill
+
+            Use `cux_*` MCP tools (`cux_snapshot`, `cux_click`, `cux_type`, `cux_batch`, `cux_browser`, `cux_bill`) or the `cux` CLI (`\(resolvedBin)`) with `--agent "\(agentLabel)"` to inspect and operate macOS apps in the background without hijacking the user's physical mouse cursor.
+
+            ## Core CLI Workflow
+            ```bash
+            # 1. Inspect target app UI (assigns @e1..@eN references)
+            \(resolvedBin) snapshot --app "WeChat" --compact --agent "\(agentLabel)"
+
+            # 2. Click or type in the background without stealing foreground focus
+            \(resolvedBin) click @e3 --agent "\(agentLabel)"
+            \(resolvedBin) type @e5 "Hello from \(agentLabel)" --clear --submit --agent "\(agentLabel)"
+
+            # 3. Complete task session and close Live PiP preview
+            \(resolvedBin) bill --finish --agent "\(agentLabel)"
+            ```
+            """
+        }
+
+        func installSkillFile(at skillDir: URL, agentLabel: String) throws {
+            try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
+            let skillFileURL = skillDir.appendingPathComponent("SKILL.md")
+            try buildSkillMarkdown(forAgent: agentLabel).write(to: skillFileURL, atomically: true, encoding: .utf8)
+            updatedPaths.append(skillFileURL.path)
+        }
 
         func upsertJSONMCPServer(at fileURL: URL) throws {
             try FileManager.default.createDirectory(
@@ -374,14 +408,145 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             updatedPaths.append(fileURL.path)
         }
 
+        // Universal Agent Skills Hub (~/.agents/skills/computer-use-x/SKILL.md)
+        if lowerTarget == "all" {
+            try? installSkillFile(
+                at: home.appendingPathComponent(".agents/skills/computer-use-x", isDirectory: true),
+                agentLabel: "Agent"
+            )
+        }
+
         if lowerTarget == "all" || lowerTarget == "claude" {
             try upsertJSONMCPServer(at: home.appendingPathComponent(".claude.json"))
+            try? installSkillFile(
+                at: home.appendingPathComponent(".claude/skills/computer-use-x", isDirectory: true),
+                agentLabel: "Claude Code"
+            )
+            let claudeDesktopDir = home.appendingPathComponent("Library/Application Support/Claude", isDirectory: true)
+            if FileManager.default.fileExists(atPath: claudeDesktopDir.path) {
+                try? upsertJSONMCPServer(at: claudeDesktopDir.appendingPathComponent("claude_desktop_config.json"))
+            }
         }
-        if lowerTarget == "all" || lowerTarget == "gemini" {
+        if lowerTarget == "all" || lowerTarget == "gemini" || lowerTarget == "antigravity" {
             try upsertJSONMCPServer(at: home.appendingPathComponent(".gemini/settings.json"))
+            let agyDir = home.appendingPathComponent(".gemini/antigravity", isDirectory: true)
+            if FileManager.default.fileExists(atPath: agyDir.path) {
+                try? upsertJSONMCPServer(at: agyDir.appendingPathComponent("mcp_config.json"))
+            }
         }
         if lowerTarget == "all" || lowerTarget == "cursor" {
             try upsertJSONMCPServer(at: home.appendingPathComponent(".cursor/mcp.json"))
+        }
+        if lowerTarget == "all" || lowerTarget == "windsurf" {
+            let wsDir = home.appendingPathComponent(".codeium/windsurf", isDirectory: true)
+            if lowerTarget == "windsurf" || FileManager.default.fileExists(atPath: wsDir.path) {
+                try upsertJSONMCPServer(at: wsDir.appendingPathComponent("mcp_config.json"))
+            }
+        }
+        if lowerTarget == "all" || lowerTarget == "openclaw" {
+            let openclawDir = home.appendingPathComponent(".openclaw", isDirectory: true)
+            if lowerTarget == "openclaw" || FileManager.default.fileExists(atPath: openclawDir.path) {
+                try installSkillFile(
+                    at: openclawDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "OpenClaw"
+                )
+                let openclawJSON = openclawDir.appendingPathComponent("openclaw.json")
+                var root: [String: Any] = [:]
+                if let existingData = try? Data(contentsOf: openclawJSON),
+                   let obj = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any] {
+                    root = obj
+                }
+                var mcpDict = (root["mcp"] as? [String: Any]) ?? [:]
+                var serversDict = (mcpDict["servers"] as? [String: Any]) ?? [:]
+                serversDict["computer-use-x"] = [
+                    "command": resolvedBin,
+                    "args": ["mcp"]
+                ]
+                mcpDict["servers"] = serversDict
+                root["mcp"] = mcpDict
+                if let outData = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
+                    try? outData.write(to: openclawJSON, options: .atomic)
+                    updatedPaths.append(openclawJSON.path)
+                }
+            }
+        }
+        if lowerTarget == "all" || lowerTarget == "opencode" {
+            let opencodeConfigDir = home.appendingPathComponent(".config/opencode", isDirectory: true)
+            if lowerTarget == "opencode" || FileManager.default.fileExists(atPath: opencodeConfigDir.path) || FileManager.default.fileExists(atPath: home.appendingPathComponent(".opencode").path) {
+                try installSkillFile(
+                    at: opencodeConfigDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "OpenCode"
+                )
+                let opencodeJSON = opencodeConfigDir.appendingPathComponent("opencode.json")
+                var root: [String: Any] = [:]
+                if let existingData = try? Data(contentsOf: opencodeJSON),
+                   let obj = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any] {
+                    root = obj
+                }
+                var mcpDict = (root["mcp"] as? [String: Any]) ?? [:]
+                mcpDict["computer-use-x"] = [
+                    "type": "local",
+                    "command": [resolvedBin, "mcp"],
+                    "enabled": true
+                ]
+                root["mcp"] = mcpDict
+                if let outData = try? JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys]) {
+                    try? outData.write(to: opencodeJSON, options: .atomic)
+                    updatedPaths.append(opencodeJSON.path)
+                }
+            }
+        }
+        if lowerTarget == "all" || lowerTarget == "pi" {
+            let piDir = home.appendingPathComponent(".pi/agent", isDirectory: true)
+            if lowerTarget == "pi" || FileManager.default.fileExists(atPath: home.appendingPathComponent(".pi").path) {
+                try installSkillFile(
+                    at: piDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "Pi"
+                )
+                try upsertJSONMCPServer(at: piDir.appendingPathComponent("mcp.json"))
+            }
+        }
+        if lowerTarget == "all" || lowerTarget == "minimax" || lowerTarget == "minimaxcode" || lowerTarget == "mmx" {
+            let minimaxDir = home.appendingPathComponent(".minimax-code", isDirectory: true)
+            if lowerTarget != "all" || FileManager.default.fileExists(atPath: minimaxDir.path) {
+                try installSkillFile(
+                    at: minimaxDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "MiniMaxCode"
+                )
+                try upsertJSONMCPServer(at: minimaxDir.appendingPathComponent("mcp.json"))
+            }
+        }
+        if lowerTarget == "all" || lowerTarget == "harness" || lowerTarget == "hermes" {
+            let harnessDir = home.appendingPathComponent(".harness", isDirectory: true)
+            if lowerTarget == "harness" || FileManager.default.fileExists(atPath: harnessDir.path) {
+                try installSkillFile(
+                    at: harnessDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "Harness"
+                )
+                try upsertJSONMCPServer(at: harnessDir.appendingPathComponent("mcp.json"))
+            }
+            let hermesDir = home.appendingPathComponent(".hermes", isDirectory: true)
+            if lowerTarget == "hermes" || FileManager.default.fileExists(atPath: hermesDir.path) {
+                try installSkillFile(
+                    at: hermesDir.appendingPathComponent("skills/computer-use-x", isDirectory: true),
+                    agentLabel: "Harness"
+                )
+                let hermesYAML = hermesDir.appendingPathComponent("config.yaml")
+                var yamlText = (try? String(contentsOf: hermesYAML, encoding: .utf8)) ?? ""
+                if !yamlText.contains("computer-use-x:") {
+                    if !yamlText.contains("mcp_servers:") {
+                        yamlText.append("\nmcp_servers:\n")
+                    }
+                    yamlText.append("""
+                      computer-use-x:
+                        command: "\(resolvedBin)"
+                        args: ["mcp"]
+                        enabled: true
+                    """)
+                    try? yamlText.write(to: hermesYAML, atomically: true, encoding: .utf8)
+                    updatedPaths.append(hermesYAML.path)
+                }
+            }
         }
         if lowerTarget == "all" || lowerTarget == "codex" {
             let codexDir = home.appendingPathComponent(".codex", isDirectory: true)
@@ -394,17 +559,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             // 1. Install Codex Skill (~/.codex/skills/computer-use-x/SKILL.md)
             let skillDir = codexDir.appendingPathComponent("skills/computer-use-x", isDirectory: true)
             try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
-            let skillMDContent = """
-            ---
-            name: computer-use-x
-            description: "Controls macOS GUI applications and desktop interfaces in the background without stealing mouse focus using ComputerUseX (`cux`) Tri-Modal Grounding (AXUIElement + Apple Vision OCR + SoM), persistent Live PiP preview window, Gemini Aurora HUD, and session billing."
-            disable-model-invocation: false
-            ---
-
-            # ComputerUseX (`cux`) — Zero-Focus Desktop Computer Use Skill for Codex
-
-            Use `cux_*` MCP tools (`cux_snapshot`, `cux_click`, `cux_type`, `cux_batch`, `cux_browser`, `cux_bill`) or the `cux` CLI (`\(resolvedBin)`) with `--agent "Codex"` to inspect and operate macOS apps in the background without hijacking the user's physical mouse cursor. Always run `cux bill --finish --agent "Codex"` when the task completes.
-            """
+            let skillMDContent = buildSkillMarkdown(forAgent: "Codex")
             let skillFileURL = skillDir.appendingPathComponent("SKILL.md")
             try skillMDContent.write(to: skillFileURL, atomically: true, encoding: .utf8)
             updatedPaths.append(skillFileURL.path)

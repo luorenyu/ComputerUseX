@@ -31,6 +31,7 @@ fi
 mkdir -p "${INSTALL_BIN_DIR}"
 
 if [[ -w "/Applications" ]]; then
+    killall ComputerUseXApp OpenComputerUseApp 2>/dev/null || true
     rm -rf "/Applications/OpenComputerUse.app" "/Applications/ComputerUseX.app"
     cp -R "${SOURCE_DIST_DIR}/ComputerUseX.app" "/Applications/ComputerUseX.app"
     ln -sf "/Applications/ComputerUseX.app/Contents/MacOS/cux" "${INSTALL_BIN_DIR}/cux"

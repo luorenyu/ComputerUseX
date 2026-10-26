@@ -4,7 +4,7 @@
 
 [English](./README.md) | [简体中文](./README_CN.md) | [安全架构](./SECURITY.md) | [贡献指南](./CONTRIBUTING.md) | [更新日志](./CHANGELOG.md)
 
-`ComputerUseX` (`cux`) 是一款基于 **原生 Swift 6（零第三方依赖）** 构建的 macOS 桌面界面感知与 GUI 自动化工具，支持 **OpenAI Codex、Claude Code、Claude Desktop、Cursor、Antigravity、Windsurf** 等主流 AI Agent。
+`ComputerUseX` (`cux`) 是一款基于 **原生 Swift 6（零第三方依赖）** 构建的 macOS 桌面界面感知与 GUI 自动化工具，原生支持 **OpenAI Codex、Claude Code / Desktop、OpenClaw、OpenCode、Pi、MiniMaxCode、Harness、Cursor、Windsurf、Antigravity** 等主流 AI Agent。
 
 通过将 macOS 原生无障碍树（`AXUIElement`）、端侧 Apple `Vision` OCR 识别、Set-of-Marks（`SoM`）视觉标注与后台事件合成（`AXPress` / `CGEvent.postToPid`）结合，`ComputerUseX` 让 Agent 能够直接读取并操控后台应用，无需抢占用户的物理鼠标或打断前台工作窗口。
 
@@ -23,11 +23,19 @@ cd ComputerUseX
 ./scripts/install.sh
 ```
 
-安装脚本会自动完成以下配置：
-- 将桌面端应用安装至 `/Applications/ComputerUseX.app`（提供状态栏守护进程、电脑操控中心与后台实时画中画预览）。
-- 将命令行工具 `cux` 软链至 `~/.local/bin/cux`（及 `/usr/local/bin/cux`）。
-- 自动注册 **OpenAI Codex** 原生插件（`~/.codex/plugins/cache/...`）、全局 Skill（`~/.codex/skills/computer-use-x`）及 `~/.codex/config.toml` MCP 配置。
-- 自动将 `computer-use-x` MCP 服务写入 **Claude Code / Desktop**、**Cursor** 与 **Antigravity / Gemini** 配置文件。
+安装脚本（或手动执行 `cux install-mcp [all|codex|claude|openclaw|opencode|pi|minimax|harness|cursor|windsurf|gemini]`）会自动检测并完成以下客户端集成：
+
+| 支持的 AI Agent | 自动注册的 MCP 配置文件 | 自动安装的插件 / Skill 路径 |
+| :--- | :--- | :--- |
+| **OpenAI Codex** | `~/.codex/config.toml` | `~/.codex/plugins/cache/computer-use-x/...`<br/>`~/.codex/skills/computer-use-x/SKILL.md` |
+| **Claude Code / Desktop** | `~/.claude.json`<br/>`~/Library/Application Support/Claude/claude_desktop_config.json` | `~/.claude/skills/computer-use-x/SKILL.md` |
+| **OpenClaw** | `~/.openclaw/openclaw.json` (`mcp.servers`) | `~/.openclaw/skills/computer-use-x/SKILL.md` |
+| **OpenCode** | `~/.config/opencode/opencode.json` (`mcp`) | `~/.config/opencode/skills/computer-use-x/SKILL.md` |
+| **Pi (`pi-coding-agent`)** | `~/.pi/agent/mcp.json` | `~/.pi/agent/skills/computer-use-x/SKILL.md` |
+| **MiniMaxCode (`mmx`)** | `~/.minimax-code/mcp.json` | `~/.minimax-code/skills/computer-use-x/SKILL.md` |
+| **Harness / Hermes** | `~/.harness/mcp.json`<br/>`~/.hermes/config.yaml` | `~/.harness/skills/computer-use-x/SKILL.md` |
+| **Cursor / Windsurf** | `~/.cursor/mcp.json`<br/>`~/.codeium/windsurf/mcp_config.json` | 共享全局 `~/.agents/skills/computer-use-x/SKILL.md` |
+| **Antigravity / Gemini** | `~/.gemini/settings.json`<br/>`~/.gemini/antigravity/mcp_config.json` | 共享全局 `~/.agents/skills/computer-use-x/SKILL.md` |
 
 ### 2. 授予系统权限并打开控制面板
 ```bash

@@ -609,8 +609,8 @@ struct OCUCLI {
                                               Smoothly drag between two elements or points (with AX window move)
           wait [--text <query>] [--timeout <sec>]
                                               Wait for text to appear on screen or pause for N seconds
-          install-mcp [claude|codex|gemini|cursor|all]
-                                              One-click register OCU MCP server into AI coding agents
+          install-mcp [all|claude|codex|gemini|cursor|windsurf|openclaw|opencode|pi|minimax|harness]
+                                              One-click register ComputerUseX MCP & Skills into AI agents
           audit [--limit <N>]                 View recent structured security & action audit log entries
           hud-demo                            Run interactive visual HUD trajectory & ripple showcase
           reset                               Reset Option+Escape emergency Kill Switch

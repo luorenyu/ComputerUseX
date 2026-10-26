@@ -332,10 +332,10 @@ public final class SessionBillingManager: @unchecked Sendable {
         var resolvedModel = cleanExplicitModel
 
         if resolvedAgent == nil || resolvedAgent!.isEmpty {
-            resolvedAgent = env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"] ?? mcpClientName ?? stickyAgent
+            resolvedAgent = env["CUX_AGENT"] ?? env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"] ?? mcpClientName ?? stickyAgent
         }
         if resolvedModel == nil || resolvedModel!.isEmpty {
-            resolvedModel = env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? mcpModelHint ?? stickyModel
+            resolvedModel = env["CUX_MODEL"] ?? env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? env["MINIMAX_MODEL"] ?? mcpModelHint ?? stickyModel
         }
 
         // Walk parent process chain (up to 7 levels) if agent is not explicitly provided
@@ -349,12 +349,20 @@ public final class SessionBillingManager: @unchecked Sendable {
                 resolvedAgent = "Claude Code"
             } else if joinedAncestry.contains("codex") || env["CODEX_SANDBOX"] != nil {
                 resolvedAgent = "OpenAI Codex"
+            } else if joinedAncestry.contains("openclaw") || joinedAncestry.contains("clawd") || env["OPENCLAW_HOME"] != nil {
+                resolvedAgent = "OpenClaw"
+            } else if joinedAncestry.contains("opencode") || env["OPENCODE"] != nil {
+                resolvedAgent = "OpenCode"
+            } else if joinedAncestry.contains("minimax") || joinedAncestry.contains("mmx") || joinedAncestry.contains("mcode") || env["MINIMAX_API_KEY"] != nil {
+                resolvedAgent = "MiniMaxCode"
+            } else if joinedAncestry.contains("harness") || joinedAncestry.contains("hermes") || env["HARNESS_AGENT"] != nil {
+                resolvedAgent = "Harness"
+            } else if joinedAncestry.contains("pi-coding") || joinedAncestry.contains("pi ") || env["PI_AGENT_DIR"] != nil {
+                resolvedAgent = "Pi"
             } else if joinedAncestry.contains("cursor") {
                 resolvedAgent = "Cursor Agent"
             } else if joinedAncestry.contains("windsurf") {
                 resolvedAgent = "Windsurf Cascade"
-            } else if joinedAncestry.contains("openclaw") || joinedAncestry.contains("clawd") {
-                resolvedAgent = "OpenClaw"
             } else if joinedAncestry.contains("gemini") {
                 resolvedAgent = "Gemini CLI"
             } else {
@@ -402,6 +410,26 @@ public final class SessionBillingManager: @unchecked Sendable {
         }
 
         if lowerAgent.contains("claude") {
+            return "claude-sonnet-4"
+        }
+
+        if lowerAgent.contains("minimax") || lowerAgent.contains("mmx") {
+            return "MiniMax-M2.5"
+        }
+
+        if lowerAgent.contains("openclaw") {
+            return "claude-sonnet-4"
+        }
+
+        if lowerAgent.contains("opencode") {
+            return "claude-sonnet-4"
+        }
+
+        if lowerAgent.contains("pi") {
+            return "claude-sonnet-4"
+        }
+
+        if lowerAgent.contains("harness") || lowerAgent.contains("hermes") {
             return "claude-sonnet-4"
         }
 
