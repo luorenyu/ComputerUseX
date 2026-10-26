@@ -202,123 +202,17 @@ public final class VirtualCursorWindowController: @unchecked Sendable {
     }
 }
 
-/// Sleek, tailless futuristic sci-fi cyber-dart pointer shape anchored at (0, 0).
-/// Features a sharp aerodynamic delta-chevron silhouette without the traditional mouse stem/tail.
-struct VirtualCursorArrowShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        // Apex at (0, 0)
-        path.move(to: CGPoint(x: 0, y: 0))
-        // Left aerodynamic blade edge
-        path.addLine(to: CGPoint(x: 1.2, y: 21.5))
-        // Inner swept-wing chevron notch (no tail!)
-        path.addLine(to: CGPoint(x: 7.4, y: 14.8))
-        // Right high-speed wingtip
-        path.addLine(to: CGPoint(x: 17.5, y: 12.6))
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// Inner holographic core facet inside the futuristic cyber-dart pointer.
-struct VirtualCursorCoreFacetShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: 2.2, y: 3.4))
-        path.addLine(to: CGPoint(x: 2.9, y: 14.2))
-        path.addLine(to: CGPoint(x: 6.8, y: 10.6))
-        path.addLine(to: CGPoint(x: 11.4, y: 9.6))
-        path.closeSubpath()
-        return path
-    }
-}
-
 struct VirtualCursorRootView: View {
     @ObservedObject var viewModel: VirtualCursorViewModel
 
     var body: some View {
         ZStack(alignment: .topLeading) {
             if viewModel.isVisible {
-                // 1. Futuristic Pulse Ring around the cursor tip (18, 16) on press
-                if viewModel.isPressed {
-                    Circle()
-                        .stroke(
-                            LinearGradient(
-                                colors: [Color.cyan, Color.blue],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 2.2
-                        )
-                        .background(Circle().fill(Color.cyan.opacity(0.22)))
-                        .frame(width: 26, height: 26)
-                        .position(x: 18, y: 16)
-                        .transition(.scale.combined(with: .opacity))
-                }
-
-                // 2. Ambient Tip Energy Halo
-                Circle()
-                    .fill(
-                        RadialGradient(
-                            colors: [
-                                (viewModel.isPressed ? Color.orange : Color.cyan).opacity(0.55),
-                                Color.clear
-                            ],
-                            center: .center,
-                            startRadius: 0,
-                            endRadius: 9
-                        )
-                    )
-                    .frame(width: 18, height: 18)
-                    .position(x: 18, y: 16)
-
-                // 3. Sleek Tailless Sci-Fi Cyber-Dart Pointer (No @eXX badge, no tail)
-                ZStack(alignment: .topLeading) {
-                    // Outer holographic blade
-                    VirtualCursorArrowShape()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.00, green: 0.96, blue: 1.00), // Electric Cyan
-                                    Color(red: 0.16, green: 0.52, blue: 1.00), // Plasma Blue
-                                    Color(red: 0.42, green: 0.28, blue: 0.98)  // Cyber Indigo
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                        .overlay(
-                            VirtualCursorArrowShape()
-                                .stroke(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white,
-                                            Color(red: 0.65, green: 0.95, blue: 1.0)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    ),
-                                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round, lineJoin: .round)
-                                )
-                        )
-
-                    // Inner glowing energy core facet
-                    VirtualCursorCoreFacetShape()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color.white.opacity(0.85),
-                                    (viewModel.isPressed ? Color.orange : Color.cyan).opacity(0.55)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .frame(width: 20, height: 24)
-                .shadow(color: Color.cyan.opacity(0.78), radius: 6, x: 0, y: 1)
-                .scaleEffect(viewModel.stretchScale, anchor: .topLeading)
-                .rotationEffect(.degrees(viewModel.tiltAngleDegrees), anchor: .topLeading)
+                UnifiedGeminiCursorView(
+                    isPressed: viewModel.isPressed,
+                    tiltDegrees: viewModel.tiltAngleDegrees,
+                    scale: CGFloat(viewModel.stretchScale)
+                )
                 .offset(x: 18, y: 16)
             }
         }

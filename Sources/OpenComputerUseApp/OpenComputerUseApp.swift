@@ -144,27 +144,24 @@ struct OpenComputerUseMenuBarApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("OpenComputerUse", systemImage: coordinator.killSwitchTripped ? "exclamationmark.octagon.fill" : "cursorarrow.motionlines") {
+        MenuBarExtra("OpenComputerUse", systemImage: coordinator.killSwitchTripped ? "exclamationmark.octagon.fill" : "sparkles") {
             VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Image(systemName: "cursorarrow.motionlines")
-                        .foregroundColor(.cyan)
-                    Text("OpenComputerUse (ocu)")
-                        .font(.headline)
+                HStack(spacing: 7) {
+                    GeminiSparkleIcon(size: 15, showHalo: true)
+                    Text("OpenComputerUse")
+                        .font(.system(size: 13.5, weight: .bold, design: .rounded))
                     Spacer()
                     Text(coordinator.ipcListening ? "● 在线" : "○ 离线")
                         .font(.caption)
-                        .foregroundColor(coordinator.ipcListening ? .green : .red)
+                        .foregroundColor(coordinator.ipcListening ? GeminiPalette.mintGreen : .red)
                 }
 
                 Divider()
 
-                // Active Operator & Usage Bill Section
+                // Active Operator & Usage Bill Section (Gemini Card)
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
-                        Image(systemName: "person.badge.key.fill")
-                            .foregroundColor(.cyan)
-                            .font(.system(size: 11))
+                        GeminiSparkleIcon(size: 11, showHalo: false)
                         Text(billViewModel.isSessionRunning ? "当前操作者 (运行中)" : "最近操作者 & 账单")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -172,17 +169,17 @@ struct OpenComputerUseMenuBarApp: App {
                         if billViewModel.isSessionRunning {
                             Text("● LIVE")
                                 .font(.system(size: 9.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(.green)
+                                .foregroundColor(GeminiPalette.mintGreen)
                         }
                     }
 
                     HStack {
-                        Text("🤖 \(billViewModel.activeAgentName)")
-                            .font(.system(size: 12, weight: .semibold))
+                        Text("✦ \(billViewModel.activeAgentName)")
+                            .font(.system(size: 12, weight: .bold))
                         Spacer()
                         Text(billViewModel.activeModelName)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundColor(.secondary)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(GeminiPalette.skyBlue)
                     }
 
                     if let lastBill = billViewModel.currentBill {
@@ -195,12 +192,19 @@ struct OpenComputerUseMenuBarApp: App {
                             Spacer()
                             Text(String(format: "💵 $%.5f", lastBill.costUSD))
                                 .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                .foregroundColor(.green)
+                                .foregroundColor(GeminiPalette.mintGreen)
                         }
                     }
                 }
-                .padding(8)
-                .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.05)))
+                .padding(9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.10))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.35), lineWidth: 1)
+                        )
+                )
 
                 // Primary Action: Open Main Dashboard Window ("电脑操控中心")
                 Button(action: {
@@ -208,7 +212,7 @@ struct OpenComputerUseMenuBarApp: App {
                 }) {
                     HStack {
                         Image(systemName: "macwindow.badge.plus")
-                            .foregroundColor(.cyan)
+                            .foregroundColor(GeminiPalette.skyBlue)
                         Text("打开电脑操控中心 (授权应用管理)")
                             .font(.system(size: 12.5, weight: .semibold))
                         Spacer()
@@ -218,7 +222,14 @@ struct OpenComputerUseMenuBarApp: App {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 7)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.cyan.opacity(0.14)))
+                    .background(
+                        RoundedRectangle(cornerRadius: 9, style: .continuous)
+                            .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.22))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.55), lineWidth: 1)
+                            )
+                    )
                 }
                 .buttonStyle(.plain)
 
@@ -227,7 +238,7 @@ struct OpenComputerUseMenuBarApp: App {
                 }) {
                     HStack {
                         Image(systemName: "doc.text.magnifyingglass")
-                            .foregroundColor(.green)
+                            .foregroundColor(GeminiPalette.violet)
                         Text("查看调用历史与消费账单明细")
                             .font(.system(size: 12, weight: .medium))
                         Spacer()
@@ -237,7 +248,7 @@ struct OpenComputerUseMenuBarApp: App {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+                    .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.primary.opacity(0.06)))
                 }
                 .buttonStyle(.plain)
 

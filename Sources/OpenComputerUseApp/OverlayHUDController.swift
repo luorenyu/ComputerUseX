@@ -279,32 +279,60 @@ struct OverlayHUDRootView: View {
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                // 1. Screen Edge Active Glow Border
+                // 1. Screen Edge Gemini Live Aurora Halo Border (Multi-Layered Diffused Glow)
                 if viewModel.showBorderGlow {
-                    RoundedRectangle(cornerRadius: 14)
-                        .strokeBorder(
-                            LinearGradient(
-                                colors: [
-                                    Color.cyan.opacity(0.85),
-                                    Color.blue.opacity(0.75),
-                                    Color.indigo.opacity(0.85),
-                                    Color.cyan.opacity(0.85)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            ),
-                            lineWidth: 4.5
-                        )
-                        .shadow(color: Color.cyan.opacity(0.65), radius: 12)
-                        .ignoresSafeArea()
-                        .transition(.opacity)
+                    ZStack {
+                        // Outer Soft Diffused Aurora Bloom
+                        RoundedRectangle(cornerRadius: 18, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        GeminiPalette.skyBlue.opacity(0.65),
+                                        GeminiPalette.blue.opacity(0.70),
+                                        GeminiPalette.violet.opacity(0.75),
+                                        GeminiPalette.coral.opacity(0.65),
+                                        GeminiPalette.skyBlue.opacity(0.65)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 12.0
+                            )
+                            .blur(radius: 14)
+
+                        // Crisp Inner Gemini Aurora Edge
+                        RoundedRectangle(cornerRadius: 14, style: .continuous)
+                            .strokeBorder(
+                                LinearGradient(
+                                    colors: [
+                                        GeminiPalette.skyBlue.opacity(0.90),
+                                        GeminiPalette.blue.opacity(0.88),
+                                        GeminiPalette.violet.opacity(0.90),
+                                        GeminiPalette.coral.opacity(0.85),
+                                        GeminiPalette.skyBlue.opacity(0.90)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                ),
+                                lineWidth: 3.5
+                            )
+                            .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 10)
+                            .shadow(color: GeminiPalette.violet.opacity(0.55), radius: 18)
+                    }
+                    .ignoresSafeArea()
+                    .transition(.opacity)
                 }
 
-                // 2. Target Element Highlight Frame (Clean futuristic frame, no internal @eXX badge)
+                // 2. Target Element Highlight Frame (Gemini Aurora Frame with Soft Glow)
                 if let rect = viewModel.highlightRect {
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.cyan, lineWidth: 2.0)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.cyan.opacity(0.08)))
+                    RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        .stroke(GeminiPalette.auroraGradient, lineWidth: 2.2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7, style: .continuous)
+                                .fill(GeminiPalette.blue.opacity(0.10))
+                        )
+                        .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 8)
+                        .shadow(color: GeminiPalette.violet.opacity(0.45), radius: 14)
                         .frame(width: max(12, rect.width), height: max(12, rect.height))
                         .position(
                             x: (rect.x - screenOrigin.x) + rect.width / 2.0,
@@ -321,48 +349,59 @@ struct OverlayHUDRootView: View {
                         )
                 }
 
-                // 5. Floating Bottom Status Pill
+                // 5. Floating Bottom Gemini Live Status Capsule
                 if let title = viewModel.pillTitle {
                     VStack {
                         Spacer()
-                        HStack(spacing: 12) {
-                            Circle()
-                                .fill(Color.cyan)
-                                .frame(width: 9, height: 9)
-                                .shadow(color: .cyan, radius: 4)
-
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(viewModel.operatorBadgeText)
-                                    .font(.system(size: 10.5, weight: .bold))
-                                    .foregroundColor(.cyan)
-                                Text(title)
-                                    .font(.system(size: 13, weight: .semibold))
-                                    .foregroundColor(.white)
-                                if let sub = viewModel.pillSubtitle, !sub.isEmpty {
-                                    Text(sub)
-                                        .font(.system(size: 11, weight: .regular, design: .monospaced))
-                                        .foregroundColor(Color.white.opacity(0.78))
-                                }
-                            }
-
-                            Text("Opt+Esc 急停")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                                .foregroundColor(.white.opacity(0.9))
-                                .padding(.horizontal, 7)
-                                .padding(.vertical, 3)
-                                .background(Capsule().fill(Color.white.opacity(0.16)))
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(
+                        ZStack {
+                            // Ambient Aurora Halo behind the Pill
                             Capsule()
-                                .fill(Color.black.opacity(0.78))
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Color.cyan.opacity(0.55), lineWidth: 1.2)
-                                )
-                                .shadow(color: Color.black.opacity(0.35), radius: 10, y: 4)
-                        )
+                                .fill(GeminiPalette.auroraHorizontalGradient)
+                                .frame(width: 380, height: 54)
+                                .blur(radius: 18)
+                                .opacity(0.42)
+
+                            HStack(spacing: 14) {
+                                GeminiSparkleIcon(size: 20, showHalo: true)
+
+                                VStack(alignment: .leading, spacing: 2.5) {
+                                    Text(viewModel.operatorBadgeText)
+                                        .font(.system(size: 11, weight: .bold))
+                                        .foregroundStyle(GeminiPalette.auroraHorizontalGradient)
+                                    Text(title)
+                                        .font(.system(size: 13.5, weight: .semibold))
+                                        .foregroundColor(.white)
+                                    if let sub = viewModel.pillSubtitle, !sub.isEmpty {
+                                        Text(sub)
+                                            .font(.system(size: 11, weight: .regular, design: .monospaced))
+                                            .foregroundColor(Color.white.opacity(0.75))
+                                    }
+                                }
+
+                                Text("Opt+Esc 急停")
+                                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                    .foregroundColor(.white.opacity(0.92))
+                                    .padding(.horizontal, 9)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(GeminiPalette.surfaceElevated)
+                                            .overlay(Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 0.8))
+                                    )
+                            }
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 11)
+                            .background(
+                                Capsule()
+                                    .fill(GeminiPalette.canvasDeep.opacity(0.90))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.4)
+                                    )
+                                    .shadow(color: GeminiPalette.blue.opacity(0.35), radius: 12, y: 2)
+                                    .shadow(color: Color.black.opacity(0.45), radius: 14, y: 6)
+                            )
+                        }
                         .padding(.bottom, 54)
                     }
                     .frame(width: geo.size.width, height: geo.size.height)
@@ -378,31 +417,36 @@ struct ClickRippleView: View {
     let ripple: RippleItem
     @State private var animate = false
 
-    private var color: Color {
+    private var strokeGradient: LinearGradient {
         switch ripple.button {
-        case .left: return .cyan
-        case .right: return .orange
-        case .center: return .purple
+        case .left:
+            return GeminiPalette.auroraGradient
+        case .right:
+            return LinearGradient(colors: [GeminiPalette.peach, GeminiPalette.coral], startPoint: .topLeading, endPoint: .bottomTrailing)
+        case .center:
+            return LinearGradient(colors: [GeminiPalette.violet, GeminiPalette.blue], startPoint: .topLeading, endPoint: .bottomTrailing)
         }
     }
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(color, lineWidth: 3)
-                .frame(width: animate ? 58 : 10, height: animate ? 58 : 10)
+                .stroke(strokeGradient, lineWidth: 2.8)
+                .frame(width: animate ? 62 : 10, height: animate ? 62 : 10)
+                .shadow(color: GeminiPalette.blue.opacity(0.7), radius: 6)
                 .opacity(animate ? 0.0 : 0.95)
 
             if ripple.clickCount >= 2 {
                 Circle()
-                    .stroke(color.opacity(0.85), lineWidth: 2)
-                    .frame(width: animate ? 82 : 16, height: animate ? 82 : 16)
+                    .stroke(strokeGradient, lineWidth: 2.0)
+                    .frame(width: animate ? 86 : 16, height: animate ? 86 : 16)
                     .opacity(animate ? 0.0 : 0.85)
             }
 
             Circle()
-                .fill(color)
+                .fill(GeminiPalette.skyBlue)
                 .frame(width: 8, height: 8)
+                .shadow(color: GeminiPalette.blue, radius: 4)
                 .opacity(animate ? 0.0 : 0.9)
         }
         .onAppear {

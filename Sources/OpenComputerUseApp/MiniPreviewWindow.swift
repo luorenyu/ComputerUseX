@@ -458,184 +458,203 @@ struct MiniPreviewRootView: View {
     let onClosePreview: () -> Void
     @State private var isHovering: Bool = false
 
+    private let haloInset: CGFloat = 10.0
+
     var body: some View {
-        GeometryReader { geo in
-            let w = max(1.0, geo.size.width)
-            let h = max(1.0, geo.size.height)
+        let cardW = max(80.0, viewModel.panelWidth - Double(haloInset * 2))
+        let cardH = max(80.0, viewModel.panelHeight - Double(haloInset * 2))
 
-            ZStack(alignment: .topLeading) {
-                // 1. Edge-to-Edge 1:1 Single Application Window Surface (Zero desktop background / zero black bars)
-                if let img = viewModel.previewImage {
-                    Image(nsImage: img)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(width: w, height: h)
-                } else {
-                    Color(red: 0.08, green: 0.09, blue: 0.12)
-                    VStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text(viewModel.appName)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.white.opacity(0.7))
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                }
+        ZStack {
+            // Outer Diffused Google Gemini Aurora Halo behind the preview window
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(GeminiPalette.auroraGradient, lineWidth: 3.5)
+                .frame(width: cardW, height: cardH)
+                .blur(radius: 6.5)
+                .opacity(0.85)
 
-                // 2. Scaled Element Highlight inside Single Window
-                if let normRect = viewModel.highlightNormRect {
-                    let hx = normRect.origin.x * w
-                    let hy = normRect.origin.y * h
-                    let hw = max(10.0, normRect.size.width * w)
-                    let hh = max(8.0, normRect.size.height * h)
+            GeometryReader { geo in
+                let w = max(1.0, geo.size.width)
+                let h = max(1.0, geo.size.height)
 
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.cyan, lineWidth: 1.8)
-                        .background(RoundedRectangle(cornerRadius: 4).fill(Color.cyan.opacity(0.14)))
-                        .frame(width: hw, height: hh)
-                        .position(x: hx + hw / 2.0, y: hy + hh / 2.0)
-                }
-
-                // 3. Scaled Click Ripples inside Single Window
-                ForEach(viewModel.ripples) { ripple in
-                    let rx = ripple.normX * w
-                    let ry = ripple.normY * h
-                    MiniPreviewRippleView()
-                        .position(x: rx, y: ry)
-                }
-
-                // 4. Scaled Futuristic Tailless Virtual Cursor inside Single Window
-                if viewModel.showCursor {
-                    let cx = viewModel.cursorNormX * w
-                    let cy = viewModel.cursorNormY * h
-
-                    ZStack(alignment: .topLeading) {
-                        if viewModel.cursorPressed {
-                            Circle()
-                                .stroke(Color.cyan, lineWidth: 2)
-                                .background(Circle().fill(Color.cyan.opacity(0.28)))
-                                .frame(width: 20, height: 20)
-                                .offset(x: -10, y: -10)
+                ZStack(alignment: .topLeading) {
+                    // 1. Edge-to-Edge 1:1 Single Application Window Surface
+                    if let img = viewModel.previewImage {
+                        Image(nsImage: img)
+                            .resizable()
+                            .interpolation(.high)
+                            .frame(width: w, height: h)
+                    } else {
+                        GeminiPalette.canvasDeep
+                        VStack(spacing: 7) {
+                            GeminiSparkleIcon(size: 20, showHalo: true)
+                            Text(viewModel.appName)
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.82))
                         }
-
-                        ZStack(alignment: .topLeading) {
-                            VirtualCursorArrowShape()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.00, green: 0.96, blue: 1.00),
-                                            Color(red: 0.14, green: 0.56, blue: 1.00),
-                                            Color(red: 0.42, green: 0.24, blue: 0.98)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-
-                            VirtualCursorCoreFacetShape()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color.white.opacity(0.90),
-                                            Color(red: 0.45, green: 0.95, blue: 1.00).opacity(0.65)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-
-                            VirtualCursorArrowShape()
-                                .stroke(Color.white, style: StrokeStyle(lineWidth: 1.3, lineJoin: .round))
-                        }
-                        .frame(width: 15, height: 19)
-                        .scaleEffect(viewModel.cursorPressed ? 0.80 : 0.92, anchor: .topLeading)
-                        .rotationEffect(.degrees(viewModel.cursorTiltDegrees), anchor: .topLeading)
-                        .shadow(color: Color.cyan.opacity(0.85), radius: 4, x: 0, y: 1)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
-                    .position(x: cx, y: cy)
-                }
 
-                // 5. Persistent Live Operator Badge (Top-Left) + Hover Control Overlay (Top-Right)
-                HStack(spacing: 6) {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.cyan)
-                            .frame(width: 6, height: 6)
-                            .shadow(color: Color.cyan, radius: 3)
-                        Text("\(viewModel.operatorAgentName) · \(viewModel.operatorModelName)")
-                            .font(.system(size: 9.5, weight: .semibold))
-                            .foregroundColor(.white)
-                            .lineLimit(1)
-                        if viewModel.operatorCostUSD > 0 {
-                            Text(String(format: "$%.4f", viewModel.operatorCostUSD))
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.30, green: 0.98, blue: 0.72))
-                        }
+                    // Bottom Ambient Gemini Live Aurora Light Leak
+                    VStack {
+                        Spacer()
+                        LinearGradient(
+                            colors: [
+                                Color.clear,
+                                GeminiPalette.blue.opacity(0.20),
+                                GeminiPalette.violet.opacity(0.32)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: 44)
                     }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3.5)
-                    .background(
-                        Capsule()
-                            .fill(Color.black.opacity(0.68))
-                            .overlay(Capsule().strokeBorder(Color.cyan.opacity(0.45), lineWidth: 0.8))
-                    )
+                    .allowsHitTesting(false)
 
-                    Spacer()
+                    // 2. Scaled Element Highlight inside Single Window (Gemini Aurora Frame)
+                    if let normRect = viewModel.highlightNormRect {
+                        let hx = normRect.origin.x * w
+                        let hy = normRect.origin.y * h
+                        let hw = max(10.0, normRect.size.width * w)
+                        let hh = max(8.0, normRect.size.height * h)
 
-                    if isHovering {
-                        Button(action: onSummonWindow) {
-                            HStack(spacing: 3) {
-                                Image(systemName: "macwindow.on.rectangle")
-                                    .font(.system(size: 9.5, weight: .bold))
-                                Text("唤起 \(viewModel.appName)")
-                                    .font(.system(size: 10, weight: .bold))
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .stroke(GeminiPalette.auroraGradient, lineWidth: 2.0)
+                            .background(
+                                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                    .fill(GeminiPalette.blue.opacity(0.16))
+                            )
+                            .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 5)
+                            .frame(width: hw, height: hh)
+                            .position(x: hx + hw / 2.0, y: hy + hh / 2.0)
+                    }
+
+                    // 3. Scaled Click Ripples inside Single Window
+                    ForEach(viewModel.ripples) { ripple in
+                        let rx = ripple.normX * w
+                        let ry = ripple.normY * h
+                        MiniPreviewRippleView()
+                            .position(x: rx, y: ry)
+                    }
+
+                    // 4. Unified Google Gemini Pointer (Identical style to Desktop Virtual Cursor!)
+                    if viewModel.showCursor {
+                        let cx = viewModel.cursorNormX * w
+                        let cy = viewModel.cursorNormY * h
+
+                        UnifiedGeminiCursorView(
+                            isPressed: viewModel.cursorPressed,
+                            tiltDegrees: viewModel.cursorTiltDegrees,
+                            scale: 0.88
+                        )
+                        .offset(x: cx, y: cy)
+                    }
+
+                    // 5. Top Bar: Gemini Sparkle Operator Pill + Hover Controls
+                    VStack {
+                        HStack(spacing: 6) {
+                            HStack(spacing: 5) {
+                                GeminiSparkleIcon(size: 11, showHalo: true)
+                                Text("\(viewModel.operatorAgentName) · \(viewModel.operatorModelName)")
+                                    .font(.system(size: 9.5, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .lineLimit(1)
+                                if viewModel.operatorCostUSD > 0 {
+                                    Text(String(format: "$%.4f", viewModel.operatorCostUSD))
+                                        .font(.system(size: 9, weight: .bold, design: .monospaced))
+                                        .foregroundColor(GeminiPalette.mint)
+                                }
                             }
-                            .foregroundColor(.white)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
-                            .background(Capsule().fill(Color.black.opacity(0.72)))
-                        }
-                        .buttonStyle(.plain)
+                            .background(
+                                Capsule()
+                                    .fill(GeminiPalette.canvasDeep.opacity(0.82))
+                                    .overlay(
+                                        Capsule()
+                                            .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1.0)
+                                    )
+                                    .shadow(color: GeminiPalette.blue.opacity(0.35), radius: 6)
+                            )
 
-                        Button(action: onClosePreview) {
-                            Image(systemName: "xmark")
-                                .font(.system(size: 9.5, weight: .bold))
-                                .foregroundColor(.white.opacity(0.88))
-                                .frame(width: 20, height: 20)
-                                .background(Circle().fill(Color.black.opacity(0.72)))
+                            Spacer()
+
+                            if isHovering {
+                                Button(action: onSummonWindow) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "macwindow.on.rectangle")
+                                            .font(.system(size: 9.5, weight: .bold))
+                                        Text("唤起 \(viewModel.appName)")
+                                            .font(.system(size: 10, weight: .bold))
+                                    }
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 4)
+                                    .background(
+                                        Capsule()
+                                            .fill(GeminiPalette.canvasDeep.opacity(0.85))
+                                            .overlay(Capsule().strokeBorder(GeminiPalette.auroraGradient, lineWidth: 0.9))
+                                    )
+                                }
+                                .buttonStyle(.plain)
+
+                                Button(action: onClosePreview) {
+                                    Image(systemName: "xmark")
+                                        .font(.system(size: 9.5, weight: .bold))
+                                        .foregroundColor(.white.opacity(0.9))
+                                        .frame(width: 20, height: 20)
+                                        .background(Circle().fill(GeminiPalette.canvasDeep.opacity(0.85)))
+                                }
+                                .buttonStyle(.plain)
+                            }
                         }
-                        .buttonStyle(.plain)
+                        .padding(8)
+
+                        Spacer()
+
+                        // 6. Bottom Gemini Mobile Live Status Bar
+                        HStack(spacing: 6) {
+                            GeminiSparkleIcon(size: 10, showHalo: false)
+                            Text(viewModel.statusText)
+                                .font(.system(size: 9.5, weight: .medium))
+                                .foregroundColor(.white.opacity(0.92))
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 4.5)
+                        .background(
+                            Capsule()
+                                .fill(GeminiPalette.canvasDeep.opacity(0.82))
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 0.9)
+                                )
+                                .shadow(color: GeminiPalette.violet.opacity(0.40), radius: 6)
+                        )
+                        .padding(.horizontal, 8)
+                        .padding(.bottom, 7)
                     }
                 }
-                .padding(7)
-            }
-            .contentShape(Rectangle())
-            .onTapGesture {
-                onSummonWindow()
-            }
-            .onHover { hovering in
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    isHovering = hovering
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    onSummonWindow()
+                }
+                .onHover { hovering in
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        isHovering = hovering
+                    }
                 }
             }
+            .frame(width: cardW, height: cardH)
+            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.6)
+            )
+            .shadow(color: GeminiPalette.violet.opacity(0.35), radius: 10, x: 0, y: 2)
+            .shadow(color: Color.black.opacity(0.48), radius: 12, x: 0, y: 6)
         }
         .frame(width: viewModel.panelWidth, height: viewModel.panelHeight)
-        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(
-                    LinearGradient(
-                        colors: [
-                            Color.cyan.opacity(0.65),
-                            Color.white.opacity(0.25)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 1.2
-                )
-        )
-        .shadow(color: Color.black.opacity(0.42), radius: 14, x: 0, y: 6)
     }
 }
 
@@ -645,12 +664,13 @@ struct MiniPreviewRippleView: View {
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.cyan, lineWidth: 2)
-                .frame(width: animate ? 34 : 6, height: animate ? 34 : 6)
+                .stroke(GeminiPalette.auroraGradient, lineWidth: 2.2)
+                .frame(width: animate ? 36 : 6, height: animate ? 36 : 6)
                 .opacity(animate ? 0.0 : 0.95)
             Circle()
-                .fill(Color.cyan)
-                .frame(width: 5, height: 5)
+                .fill(GeminiPalette.skyBlue)
+                .frame(width: 6, height: 6)
+                .shadow(color: GeminiPalette.blue, radius: 4)
                 .opacity(animate ? 0.0 : 0.9)
         }
         .onAppear {
