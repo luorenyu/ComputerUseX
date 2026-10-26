@@ -31,7 +31,6 @@ public final class MainDashboardViewModel: ObservableObject, @unchecked Sendable
     @Published public var screenRecordingGranted: Bool = true
     @Published public var newAppInput: String = ""
     @Published public var showAddAppSheet: Bool = false
-    public var tabLocalFrames: [DashboardSection: CGRect] = [:]
 
     public init() {
         refresh()
@@ -123,6 +122,7 @@ public final class MainDashboardWindowController: @unchecked Sendable {
 
     public let viewModel = MainDashboardViewModel()
     private var window: NSWindow?
+    fileprivate var tabProbeViews: [DashboardSection: DashboardTabProbeNSView] = [:]
 
     private init() {}
 
@@ -175,23 +175,19 @@ public final class MainDashboardWindowController: @unchecked Sendable {
     public func screenRectForTab(_ sec: DashboardSection) -> ScreenRect {
         var result = ScreenRect(x: 400, y: 300, width: 140, height: 34)
         let block = {
+            if let probe = self.tabProbeViews[sec], let liveRect = probe.currentScreenRect() {
+                result = liveRect
+                return
+            }
             guard let win = self.window else { return }
             let mainScreenH = NSScreen.screens.first?.frame.height ?? 900.0
+            let contentTopY = win.frame.minY + win.contentLayoutRect.maxY
             let winTopLeftX = Double(win.frame.minX)
-            let winTopLeftY = Double(mainScreenH - win.frame.maxY)
-            if let local = self.viewModel.tabLocalFrames[sec], local.width > 10 {
-                result = ScreenRect(
-                    x: winTopLeftX + Double(local.minX),
-                    y: winTopLeftY + Double(local.minY),
-                    width: Double(local.width),
-                    height: Double(local.height)
-                )
+            let winTopLeftY = Double(mainScreenH - contentTopY)
+            if sec == .control {
+                result = ScreenRect(x: winTopLeftX + 36, y: winTopLeftY + 112, width: 126, height: 34)
             } else {
-                if sec == .control {
-                    result = ScreenRect(x: winTopLeftX + 36, y: winTopLeftY + 112, width: 126, height: 34)
-                } else {
-                    result = ScreenRect(x: winTopLeftX + 174, y: winTopLeftY + 112, width: 162, height: 34)
-                }
+                result = ScreenRect(x: winTopLeftX + 174, y: winTopLeftY + 112, width: 162, height: 34)
             }
         }
         if Thread.isMainThread {
@@ -391,6 +387,43 @@ enum AppIconResolver {
     }
 }
 
+// MARK: - Native AppKit Screen Coordinate Probe for Dashboard Tabs
+
+final class DashboardTabProbeNSView: NSView {
+    func currentScreenRect() -> ScreenRect? {
+        guard let win = self.window, self.bounds.width > 10, self.bounds.height > 10 else {
+            return nil
+        }
+        let rectInWindow = self.convert(self.bounds, to: nil)
+        let rectInScreen = win.convertToScreen(rectInWindow)
+        let mainScreenH = NSScreen.screens.first?.frame.height ?? 900.0
+        return ScreenRect(
+            x: Double(rectInScreen.minX),
+            y: Double(mainScreenH - rectInScreen.maxY),
+            width: Double(rectInScreen.width),
+            height: Double(rectInScreen.height)
+        )
+    }
+}
+
+private struct DashboardTabProbeRepresentable: NSViewRepresentable {
+    let section: DashboardSection
+
+    func makeNSView(context: Context) -> DashboardTabProbeNSView {
+        let view = DashboardTabProbeNSView(frame: .zero)
+        DispatchQueue.main.async {
+            MainDashboardWindowController.shared.tabProbeViews[section] = view
+        }
+        return view
+    }
+
+    func updateNSView(_ nsView: DashboardTabProbeNSView, context: Context) {
+        DispatchQueue.main.async {
+            MainDashboardWindowController.shared.tabProbeViews[section] = nsView
+        }
+    }
+}
+
 // MARK: - Main Dashboard SwiftUI View (Google Gemini Desktop & Mobile Live Style)
 
 struct MainDashboardRootView: View {
@@ -506,17 +539,7 @@ struct MainDashboardRootView: View {
                                         y: 2
                                     )
                             )
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear
-                                        .onAppear {
-                                            viewModel.tabLocalFrames[sec] = geo.frame(in: .named("DashboardRootSpace"))
-                                        }
-                                        .onChange(of: geo.frame(in: .named("DashboardRootSpace"))) { _, newRect in
-                                            viewModel.tabLocalFrames[sec] = newRect
-                                        }
-                                }
-                            )
+                            .background(DashboardTabProbeRepresentable(section: sec))
                         }
                         .buttonStyle(.plain)
                     }
