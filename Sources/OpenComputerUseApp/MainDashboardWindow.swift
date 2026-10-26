@@ -356,6 +356,29 @@ struct MainDashboardRootView: View {
 
                     Spacer()
 
+                    // One-click Copy MCP Config Button
+                    Button(action: {
+                        DaemonAppCoordinator.shared.copyMCPConfigToClipboard()
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "doc.on.doc")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(GeminiPalette.textSkyBright)
+                            Text("复制 MCP 配置")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white.opacity(0.92))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(GeminiPalette.surfaceCard)
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("一键复制 MCP Server 配置 JSON 到剪贴板")
+
                     // Demo Showcase Button in Main Settings Window
                     Button(action: {
                         DaemonAppCoordinator.shared.runVisualHUDDemo()
@@ -443,6 +466,69 @@ struct MainDashboardRootView: View {
 
     private var controlAndAppsView: some View {
         VStack(alignment: .leading, spacing: 24) {
+            // 0. Permission Onboarding Banner (if Accessibility or Screen Recording is missing)
+            if !viewModel.accessibilityGranted || !viewModel.screenRecordingGranted {
+                HStack(spacing: 14) {
+                    ZStack {
+                        Circle()
+                            .fill(GeminiPalette.peach.opacity(0.20))
+                            .frame(width: 36, height: 36)
+                        Image(systemName: "exclamationmark.shield.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundColor(GeminiPalette.peach)
+                    }
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("需要完成 macOS 系统权限授权")
+                            .font(.system(size: 13.5, weight: .bold))
+                            .foregroundColor(.white)
+                        Text("请开启「辅助功能」（读取界面元素树与合成点击）与「屏幕录制」（OCR 视觉兜底与实时画中画预览）权限。")
+                            .font(.system(size: 12))
+                            .foregroundColor(GeminiPalette.textSecondary)
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 8) {
+                        if !viewModel.accessibilityGranted {
+                            Button(action: {
+                                DaemonAppCoordinator.shared.resetAndPromptAccessibility()
+                            }) {
+                                Text("授权辅助功能")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(GeminiPalette.blue.opacity(0.35)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        if !viewModel.screenRecordingGranted {
+                            Button(action: {
+                                DaemonAppCoordinator.shared.resetAndPromptScreenRecording()
+                            }) {
+                                Text("授权屏幕录制")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(GeminiPalette.violet.opacity(0.38)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(16)
+                .background(
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(GeminiPalette.surfaceElevated)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                .strokeBorder(GeminiPalette.peach.opacity(0.45), lineWidth: 1)
+                        )
+                )
+            }
+
             // 1. "控制" Section
             VStack(alignment: .leading, spacing: 10) {
                 Text("控制")

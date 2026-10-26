@@ -18,9 +18,13 @@ mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 cp "${ROOT_DIR}/Info.plist" "${CONTENTS_DIR}/Info.plist"
 cp "${ROOT_DIR}/.build/release/OpenComputerUseApp" "${MACOS_DIR}/OpenComputerUseApp"
+cp "${ROOT_DIR}/.build/release/ocu" "${MACOS_DIR}/ocu"
 cp "${ROOT_DIR}/.build/release/ocu" "${DIST_DIR}/ocu"
 
-chmod +x "${MACOS_DIR}/OpenComputerUseApp" "${DIST_DIR}/ocu"
+chmod +x "${MACOS_DIR}/OpenComputerUseApp" "${MACOS_DIR}/ocu" "${DIST_DIR}/ocu" "${ROOT_DIR}/scripts/generate-icon.swift"
+
+echo "🎨 Generating Google Gemini Aurora AppIcon.icns..."
+swift "${ROOT_DIR}/scripts/generate-icon.swift" "${RESOURCES_DIR}/AppIcon.icns"
 
 # Prefer a deterministic Apple Development certificate (sorted by name) so rebuilds keep macOS TCC permissions;
 # otherwise fall back to ad-hoc signature.
@@ -30,10 +34,12 @@ DEV_NAME="$(echo "${DEV_IDENTITY_LINE}" | awk -F'"' '{print $2}' || true)"
 
 if [[ -n "${DEV_HASH}" ]]; then
     echo "🔏 Signing bundle with stable developer identity: ${DEV_NAME} (${DEV_HASH})"
+    codesign --force --sign "${DEV_HASH}" "${MACOS_DIR}/ocu"
     codesign --force --sign "${DEV_HASH}" --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
     codesign --force --sign "${DEV_HASH}" "${DIST_DIR}/ocu"
 else
     echo "🔏 Signing bundle with ad-hoc signature..."
+    codesign --force --sign - "${MACOS_DIR}/ocu"
     codesign --force --sign - --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
     codesign --force --sign - "${DIST_DIR}/ocu"
 fi

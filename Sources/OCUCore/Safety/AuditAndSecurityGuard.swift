@@ -342,9 +342,11 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
     public func installMCPConfiguration(target: String = "all", binaryPath: String? = nil) throws -> ActionOutcome {
         let resolvedBin: String = {
             if let custom = binaryPath, !custom.isEmpty { return custom }
+            let appBin = "/Applications/OpenComputerUse.app/Contents/MacOS/ocu"
+            if FileManager.default.fileExists(atPath: appBin) { return appBin }
             let localBin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/ocu").path
             if FileManager.default.fileExists(atPath: localBin) { return localBin }
-            return CommandLine.arguments.first ?? "/Users/ronny/.local/bin/ocu"
+            return CommandLine.arguments.first ?? localBin
         }()
 
         let home = FileManager.default.homeDirectoryForCurrentUser

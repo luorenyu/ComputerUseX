@@ -1,8 +1,8 @@
 # Codex 独立虚拟鼠标与后台非侵入式操控（Virtual Cursor & Background Mode）逆向审计与架构设计方案
 
 **日期**：2026-10-25  
-**审计对象**：`/Users/ronny/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService`  
-**目标工程**：`OpenComputerUse (ocu)` (`/Users/ronny/Agent/RonnyDaily/OpenComputerUse`)
+**审计对象**：`~/.codex/computer-use/Codex Computer Use.app/Contents/MacOS/SkyComputerUseService`  
+**目标工程**：`OpenComputerUse (ocu)` (`./OpenComputerUse`)
 
 ---
 

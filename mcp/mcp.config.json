@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "open-computer-use": {
-      "command": "/Users/ronny/Agent/RonnyDaily/OpenComputerUse/dist/OpenComputerUse.app/Contents/MacOS/ocu",
+      "command": "/Applications/OpenComputerUse.app/Contents/MacOS/ocu",
       "args": ["mcp"]
     }
   }

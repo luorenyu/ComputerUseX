@@ -1,7 +1,7 @@
 # OpenComputerUse (`ocu`) — 产品级架构与详细设计文档
 
 - **日期**: 2026-10-25
-- **项目目录**: `/Users/ronny/Agent/RonnyDaily/OpenComputerUse`
+- **项目目录**: `./OpenComputerUse`
 - **命令行 / MCP 名称**: `ocu`
 - **桌面宿主应用**: `OpenComputerUse.app`
 - **技术栈**: Swift 6.0 (macOS 14+), AppKit / SwiftUI, ApplicationServices (AXUIElement), Vision (VNRecognizeTextRequest), ScreenCaptureKit / CoreGraphics, POSIX Unix Domain Socket, MCP (JSON-RPC 2.0 over stdio)

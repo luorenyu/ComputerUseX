@@ -1,0 +1,42 @@
+name: CI & Release Build
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    name: Build & Test (macOS Swift 6)
+    runs-on: macos-15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Swift version
+        run: swift --version
+
+      - name: Run Unit Tests
+        run: swift test
+
+      - name: Build Release App Bundle & CLI
+        run: ./scripts/build-app.sh
+
+      - name: Verify CLI Diagnostics
+        run: ./dist/ocu --help
+
+      - name: Package Release Archive
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          cd dist
+          zip -r OpenComputerUse-macos-arm64.zip OpenComputerUse.app ocu
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OpenComputerUse-macos-arm64
+          path: |
+            dist/OpenComputerUse.app
+            dist/ocu

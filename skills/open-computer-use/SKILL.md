@@ -27,7 +27,7 @@ Always follow the **Snapshot (`@e1`) -> Action -> Verify -> Finish Bill** loop, 
    ocu type @e5 "OpenComputerUse 桌面自动化" --clear --submit
 
    # Execute multiple steps in one batch:
-   ocu batch "click @e3" "type '黑骑士' --submit" "wait --timeout 0.8" "snapshot --app WeChat --compact"
+   ocu batch "click @e3" "type '文件传输助手' --submit" "wait --timeout 0.8" "snapshot --app WeChat --compact"
    ```
 3. **Finalize Task & Close Preview Window (`ocu bill --finish`)**:
    When the user's task is complete, ALWAYS run:

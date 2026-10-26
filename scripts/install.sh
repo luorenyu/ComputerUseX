@@ -8,14 +8,19 @@ INSTALL_BIN_DIR="${HOME}/.local/bin"
 mkdir -p "${INSTALL_BIN_DIR}"
 ln -sf "${ROOT_DIR}/dist/ocu" "${INSTALL_BIN_DIR}/ocu"
 
-echo ""
+if [[ -w "/Applications" ]]; then
+    rm -rf "/Applications/OpenComputerUse.app"
+    cp -R "${ROOT_DIR}/dist/OpenComputerUse.app" "/Applications/OpenComputerUse.app"
+    echo "🎉 Installed 'OpenComputerUse.app' to /Applications/OpenComputerUse.app"
+fi
+
 echo "🎉 Installed 'ocu' to ${INSTALL_BIN_DIR}/ocu"
-echo "📌 MCP Server Configuration (Antigravity / Claude / Cursor):"
+echo "📌 MCP Server Configuration (Antigravity / Claude / Cursor / Windsurf):"
 cat <<EOF
 {
   "mcpServers": {
     "open-computer-use": {
-      "command": "${ROOT_DIR}/dist/ocu",
+      "command": "${INSTALL_BIN_DIR}/ocu",
       "args": ["mcp"]
     }
   }

@@ -1,137 +1,137 @@
-# OpenComputerUse (`ocu`)
+# ✦ OpenComputerUse (`ocu`)
 
-**Product-Grade macOS Computer Use Engine, Visual HUD Companion App & Universal MCP / Skill Plugin for AI Agents.**
+**Product-Grade macOS Computer Use Engine, Zero-Focus Background Virtual Cursor, Live PiP Preview, Session Billing & Universal MCP / Skill Plugin for AI Agents.**
 
-`OpenComputerUse` (`ocu`) brings Codex-class (and beyond) native GUI desktop perception and pointer control to **Antigravity, Claude Code, Claude Desktop, Cursor, Windsurf, OpenAI Codex**, and any MCP- or CLI-compatible Agent on macOS.
+[English](./README.md) | [简体中文](./README_CN.md) | [Security Policy](./SECURITY.md) | [Contributing](./CONTRIBUTING.md) | [Changelog](./CHANGELOG.md)
+
+`OpenComputerUse` (`ocu`) is a **100% native Swift 6** (zero external dependencies) macOS desktop perception and GUI automation engine designed for **Antigravity, Claude Code, Claude Desktop, OpenAI Codex, Cursor, and Windsurf**.
+
+Unlike screenshot-only Computer Use wrappers that hijack your physical mouse, yank background windows to the front, and burn tens of thousands of vision tokens per task, `OpenComputerUse` operates background apps silently with a **Google Gemini Live-inspired UI**, a **Zero-Focus Virtual Cursor**, a **Persistent Live Picture-in-Picture (PiP) Preview**, and **Full Session Usage Billing**.
 
 ---
 
-## ✨ Why OpenComputerUse?
+## 🌟 Key Highlights
 
-Traditional "Computer Use" implementations rely purely on full-screen screenshots and asking a vision LLM to guess `(x, y)` pixel coordinates—resulting in high latency, heavy token cost, and Retina scaling drift.
+### 1. 🔍 Tri-Modal Hybrid Grounding (`AXUIElement` + Apple `Vision` OCR + Set-of-Marks)
+- **Millisecond Native AX Tree**: Directly traverses macOS `AXUIElement` hierarchies (`button`, `textfield`, `menuitem`, `checkbox`, etc.) and assigns deterministic references (`@e1`, `@e2`, ...).
+- **On-Device Vision OCR Fallback**: Automatically runs Apple `Vision` (`VNRecognizeTextRequest`, `zh-Hans` + `en-US`) on custom canvases, Electron/WeChat views, or unlabelled icons, deduplicating against AX nodes via IoU matching.
+- **Set-of-Marks (SoM) Visual Annotation**: Renders color-coded bounding boxes and `@eX` badges onto window-cropped screenshots for multimodal verification.
+- **Token-Saving Compact & Diff Engine**: Supports `--compact` (top-N salient elements), `--diff` (incremental AX tree diff), and perceptual `dHash` image deduplication.
 
-**OpenComputerUse (`ocu`) solves this with a 100% native Swift 6 dual-end architecture:**
+### 2. 👻 Zero-Focus Background Virtual Cursor & Persistent Live PiP Preview
+- **Never Hijacks Your Physical Mouse**: Dispatches actions directly to target windows (`AXPress`, `AXValue`, background `CGEvent.postToPid`, and CoreGraphics window-specific synthetic focus) without moving your hardware cursor or stealing foreground focus.
+- **Persistent Bottom-Right Live PiP Window**: While an Agent operates a background app (e.g., sending a WeChat message across multiple steps), a floating **Gemini Aurora-framed Live PiP Window** stays continuously open in the bottom-right corner—showing the unified virtual pointer, click ripples, and `"✦ Agent 正在分析与规划下一步..."` status—until `ocu bill --finish` completes the task.
+- **One-Click Foreground Takeover**: Click anywhere on the Live PiP preview window to immediately unminimize and summon the real target window to the front.
 
-1. **🔍 Tri-Modal Hybrid Grounding (`AXUIElement` + Apple `Vision` OCR + Set-of-Marks)**
-   - **Native AX Tree**: Reads interactive macOS controls (`button`, `textfield`, `menuitem`, `checkbox`, etc.) in milliseconds and assigns deterministic references (`@e1`, `@e2`, ...).
-   - **Apple Vision OCR Fallback**: Automatically runs on-device Chinese/English OCR (`VNRecognizeTextRequest`) to detect clickable text inside custom canvases, Electron apps, games, or unlabelled UI, deduplicating against AX nodes via IoU matching.
-   - **Set-of-Marks (SoM) Visual Annotation**: Draws color-coded bounding boxes, `@e1` badges, and logical coordinate rulers directly onto screenshots for multimodal verification.
-2. **✨ Codex-Style Full-Screen Click-Through Visual HUD (`OpenComputerUse.app`)**
-   - **Active Border Glow**: Soft cyan/indigo breathing border around the display while an Agent is operating.
-   - **Cubic Bézier Pointer Physics**: Human-like smooth cursor movement with ease-in-out velocity and a glowing comet trail.
-   - **Target Frame Highlight & Click Ripples**: Visual highlight around `@eX` targets and color-coded expanding ripples (Cyan for left-click, dual ring for double-click, Amber for right-click).
-   - **Floating Action Pill**: Frosted glass status capsule at the bottom of the screen showing real-time agent actions and the `Opt+Esc` kill-switch hint.
-3. **🛡️ Hardware-Level Safety Guardrails**
-   - **Global Kill Switch (`Option + Escape`)**: Immediately aborts any ongoing automation sequence.
-   - **Human Mouse Takeover Detection**: Automatically yields control (`ERR_HUMAN_TAKEOVER`) if the user physically grabs and moves the mouse during agent execution.
-   - **Zero-Garble Multi-Language Input**: Transactional pasteboard injection types Chinese, English, Emoji, and code snippets instantaneously while preserving the user's original clipboard.
+### 3. ✦ Google Gemini (Mobile Live & Desktop) Design System
+- **Ambient Aurora Halos**: Deep obsidian canvas (`#0D0F15`) paired with diffused 4-stop Google Gemini Aurora gradients (`#66B8FF` -> `#4285F4` -> `#9B72CB` -> `#D96570`) and concave 4-point Gemini sparkle icons (`✦`).
+- **100% Unified Cyber-Blade Pointer**: Both the desktop virtual cursor and the Mini PiP preview cursor share a single `UnifiedGeminiCursorView` with an aerodynamic tailless aurora blade, crystalline inner facet, 4-point sparkle glint, and tip energy halo.
+- **Multi-Monitor Single-Screen Lock**: In multi-display setups, the screen-edge Gemini Aurora border glow and floating bottom status capsule lock strictly onto the single display currently being operated on.
+
+### 4. 🖥️ Main Control Center (`ocu dashboard`) & End-to-End Session Billing (`ocu bill`)
+- **App Authorization & Sandbox Control Center**: Manage "Allow Any App" vs. interactive first-time app consent prompts, per-app allowlists, zero-focus Chrome/Safari/Arc/Brave/Edge DOM bridges, and lock-screen background sandboxing.
+- **Complete Task Billing Receipts**: Tracks which **Agent** and **LLM Model** (e.g., `Antigravity · Gemini 4 Argon Medium`) is operating `OpenComputerUse`, recording **Total Task Duration (including LLM thinking time) + ComputerUse Tool Execution Duration**, input/output tokens, and USD / CNY cost.
 
 ---
 
 ## 🏗️ Architecture
 
 ```
-+-----------------------------------------------------------------------+
-|   Antigravity  |  Claude Code / Desktop  |  Cursor  |  OpenAI Codex   |
-+-----------------------------------+-----------------------------------+
-                                    | MCP (stdio JSON-RPC 2.0) or Skill CLI
-                                    v
-+-----------------------------------------------------------------------+
-|                     `ocu` (CLI & MCP Server Binary)                   |
-|  - Subcommands: status, doctor, apps, snapshot, click, type, press... |
-|  - MCP Server: 10 tools over stdio (`ocu mcp`)                        |
-+-----------------------------------+-----------------------------------+
-                                    | Unix Domain Socket (/tmp/ocu-<uid>.sock)
-                                    v
-+-----------------------------------------------------------------------+
-|             `OpenComputerUse.app` (MenuBar Host & HUD Engine)         |
-|  - Holds unified macOS TCC Permissions (Accessibility + ScreenRecord) |
-|  - Renders Full-Screen Non-Activating Click-Through Visual HUD        |
-|  - Executes OCUCore Tri-Modal Perception & Bézier Action Engine       |
-+-----------------------------------------------------------------------+
++-------------------------------------------------------------------------+
+|   Antigravity  |  Claude Code / Desktop  |  Cursor  |   OpenAI Codex    |
++------------------------------------+------------------------------------+
+                                     | MCP (stdio JSON-RPC 2.0) or Skill CLI
+                                     v
++-------------------------------------------------------------------------+
+|                      `ocu` (CLI & MCP Server Binary)                    |
+|  - 17 MCP Tools (`ocu mcp`) & CLI Subcommands                           |
+|  - Self-reporting `--agent` & `--model` telemetry                       |
++------------------------------------+------------------------------------+
+                                     | Unix Domain Socket (/tmp/ocu-<uid>.sock)
+                                     v
++-------------------------------------------------------------------------+
+|          `OpenComputerUse.app` (MenuBar Daemon & Gemini HUD)            |
+|  - Native NSStatusItem + NSPopover MenuBar Controller                   |
+|  - Main Control Center (`ocu dashboard`) & App Permission Guard         |
+|  - Persistent Bottom-Right Live PiP Preview & Unified Gemini Pointer    |
+|  - Single-Display Locked Full-Screen Click-Through Gemini Aurora HUD    |
++-------------------------------------------------------------------------+
 ```
 
 ---
 
-## 🚀 Quick Start
+## 🚀 1-Minute Quick Start
 
-### 1. Build & Package Release Bundle
+### 1. Build & Install
 ```bash
-./scripts/build-app.sh
+git clone https://github.com/your-org/OpenComputerUse.git
+cd OpenComputerUse
+./scripts/install.sh
 ```
-This compiles the Swift 6 release binaries and produces:
-- `dist/OpenComputerUse.app` (Menu Bar companion app + HUD daemon)
-- `dist/ocu` (Standalone CLI & MCP Server binary)
+This compiles the Swift 6 release binaries, generates the Gemini Aurora `AppIcon.icns`, installs `/Applications/OpenComputerUse.app`, and links `~/.local/bin/ocu`.
 
-### 2. Launch the Menu Bar & Visual HUD App
+### 2. Launch the Companion App & Open Control Center
 ```bash
-open dist/OpenComputerUse.app
+open /Applications/OpenComputerUse.app
+ocu dashboard
 ```
-Grant **Accessibility** and **Screen Recording** permissions from the Menu Bar popover, or test the visual HUD directly:
+Grant **Accessibility** and **Screen Recording** permissions using the one-click onboarding banner in the Control Center, then click **"✦ 演示效果 (Demo)"** (or run `ocu hud-demo`) to preview the Gemini Aurora HUD and unified pointer.
+
+### 3. Core Agent CLI Workflow
 ```bash
-./dist/ocu hud-demo
-```
+# 1. Inspect a background app (opens persistent Live PiP preview & reports Agent/Model)
+ocu snapshot --app "WeChat" --compact --agent "Antigravity" --model "Gemini 4 Argon Medium"
 
-### 3. Run CLI Diagnostics & Commands
-```bash
-# Check permissions, screen metrics, and daemon status
-./dist/ocu doctor
+# 2. Click & type in the background without stealing foreground focus
+ocu click @e3
+ocu type @e5 "Hello from OpenComputerUse!" --clear --submit
 
-# List running GUI apps and windows
-./dist/ocu apps
-
-# Scan active window (AX Tree + Apple Vision OCR + SoM Annotated Screenshot)
-./dist/ocu snapshot --som --output /tmp/som.png
-
-# Click element @e1 with smooth Bézier trajectory & HUD ripple
-./dist/ocu click @e1
-
-# Type Chinese/English text into @e3 and submit
-./dist/ocu type @e3 "Hello OpenComputerUse 桌面自动化" --clear --submit
-
-# Trigger keyboard shortcut
-./dist/ocu press "cmd+shift+p"
+# 3. Finish task session (closes Live PiP preview & records complete session bill)
+ocu bill --finish --agent "Antigravity" --model "Gemini 4 Argon Medium"
 ```
 
 ---
 
-## 🔌 Agent Integration
+## 🔌 MCP Server Integration (17 Tools)
 
-### Option A: MCP Server (Antigravity / Claude / Cursor / Windsurf)
-Add to your MCP configuration (`mcp_config.json` or `claude_desktop_config.json`):
+Add to your MCP configuration (`mcp_config.json` or `claude_desktop_config.json`), or run `ocu mcp-install`:
 ```json
 {
   "mcpServers": {
     "open-computer-use": {
-      "command": "/Users/ronny/Agent/RonnyDaily/OpenComputerUse/dist/OpenComputerUse.app/Contents/MacOS/ocu",
+      "command": "/Applications/OpenComputerUse.app/Contents/MacOS/ocu",
       "args": ["mcp"]
     }
   }
 }
 ```
 
-#### Provided MCP Tools (10 Tools)
 | Tool | Description |
 | :--- | :--- |
 | `ocu_status` | Inspect TCC permissions, daemon connection, screen resolution, and cursor coordinates |
 | `ocu_apps` | List running GUI apps & windows, or focus/launch/resize a target application |
-| `ocu_snapshot` | Capture Tri-Modal UI snapshot (`@e1..@eN` from AX + Vision OCR) and optional SoM annotated PNG |
+| `ocu_snapshot` | Capture Tri-Modal UI snapshot (`@e1..@eN`) with `--compact`, `--diff`, and optional SoM PNG |
 | `ocu_click` | Click by `@eX` reference, fuzzy label, or `(x, y)` coordinates (left/right/double/ax_native) |
-| `ocu_move` | Glide mouse cursor smoothly along a cubic Bézier curve to `@eX` or `(x, y)` |
-| `ocu_type` | Click optional `@eX` and type multi-language text safely with optional `--clear` and `--submit` |
+| `ocu_move` | Glide unified Gemini pointer smoothly along a cubic Bézier curve to `@eX` or `(x, y)` |
+| `ocu_type` | Type multi-language text safely via `AXValue` or transactional pasteboard with `--clear` / `--submit` |
 | `ocu_press` | Press key or shortcut combination (`cmd+c`, `cmd+shift+p`, `enter`, `escape`, `tab`) |
 | `ocu_scroll` | Smooth pixel scrolling (`dx`, `dy`) at current cursor or target `@eX` |
 | `ocu_drag` | Smooth drag between two elements (`@e1` -> `@e2`) or coordinate pairs |
 | `ocu_wait` | Poll until target text appears on screen (AX + OCR) or wait for fixed seconds |
-
-### Option B: Agent Skill (`SKILL.md`)
-Copy or symlink `skills/open-computer-use` into your `~/.gemini/config/skills/` or `~/.claude/skills/` directory.
+| `ocu_batch` | Execute multiple DSL commands (`click @e1`, `type "text" --submit`, `wait`) in one call |
+| `ocu_clipboard` | Read or write macOS system clipboard without UI interaction |
+| `ocu_browser` | Zero-focus DOM & JavaScript bridge for Chrome, Safari, Arc, Brave, and Edge |
+| `ocu_watch` | Reactive UI monitor that blocks until target text appears or disappears |
+| `ocu_workflow` | Record, replay, and list parameterized GUI automation macros (`~/.ocu/workflows/`) |
+| `ocu_audit` | Inspect security audit logs and manage per-app authorization rules (`~/.ocu/security.json`) |
+| `ocu_bill` | Query or finalize task session usage bills (`Total Duration + Tool Duration`, Tokens, USD/CNY) |
 
 ---
 
-## 🧪 Testing
+## 🧪 Testing & License
 
-Run the unit test suite (covering geometry IoU, Bézier trajectory sampling, Vision OCR coordinate transforms, SoM image annotation, Unix Socket IPC round-trip, and MCP JSON-RPC protocol):
 ```bash
 swift test
 ```
+
+Licensed under the [MIT License](./LICENSE).
