@@ -126,21 +126,7 @@ public final class MainDashboardWindowController: @unchecked Sendable {
     private init() {}
 
     public func dismissMenuBarPopup() {
-        for win in NSApp.windows {
-            if win === self.window { continue }
-            let className = String(describing: type(of: win)).lowercased()
-            let isMenuPopup = className.contains("menubar")
-                || className.contains("statusbar")
-                || className.contains("popup")
-                || className.contains("popover")
-                || win.level == .popUpMenu
-                || win.level == .statusBar
-                || (win === NSApp.keyWindow && !win.styleMask.contains(.titled))
-            if isMenuPopup && win.isVisible {
-                win.orderOut(nil)
-                win.close()
-            }
-        }
+        StatusBarPopoverController.shared.closePopover()
     }
 
     public func showWindow(section: DashboardSection? = nil) {

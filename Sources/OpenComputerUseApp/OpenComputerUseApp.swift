@@ -27,6 +27,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
         VirtualCursorWindowController.shared.ensureWindowCreated()
         MiniPreviewWindowController.shared.ensureWindowCreated()
         SessionBillWindowController.shared.ensureWindowCreated()
+        StatusBarPopoverController.shared.setupStatusItem()
 
         KillSwitchMonitor.shared.setHUDHandler { event in
             OverlayHUDWindowController.shared.viewModel.handle(event)
@@ -60,6 +61,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
             self.accessibilityGranted = ax
             self.screenRecordingGranted = sr
             self.killSwitchTripped = tripped
+            StatusBarPopoverController.shared.updateIcon(killSwitchTripped: tripped)
         }
     }
 
@@ -132,10 +134,6 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
 
 @main
 struct OpenComputerUseMenuBarApp: App {
-    @StateObject private var coordinator = DaemonAppCoordinator.shared
-    @StateObject private var hudViewModel = OverlayHUDWindowController.shared.viewModel
-    @StateObject private var billViewModel = SessionBillWindowController.shared.viewModel
-
     init() {
         DispatchQueue.main.async {
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -145,22 +143,105 @@ struct OpenComputerUseMenuBarApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("OpenComputerUse", systemImage: coordinator.killSwitchTripped ? "exclamationmark.octagon.fill" : "sparkles") {
-            MenuBarPopupContentView(
-                coordinator: coordinator,
-                billViewModel: billViewModel
+        Settings {
+            EmptyView()
+        }
+    }
+}
+
+public final class StatusBarPopoverController: NSObject, @unchecked Sendable {
+    public static let shared = StatusBarPopoverController()
+
+    private var statusItem: NSStatusItem?
+    private let popover = NSPopover()
+    private var globalClickMonitor: Any?
+
+    private override init() {
+        super.init()
+    }
+
+    public func setupStatusItem() {
+        DispatchQueue.main.async {
+            guard self.statusItem == nil else { return }
+
+            let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+            if let button = item.button {
+                button.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "OpenComputerUse")
+                button.image?.isTemplate = true
+                button.target = self
+                button.action = #selector(self.togglePopover(_:))
+            }
+            self.statusItem = item
+
+            let contentView = MenuBarPopupContentView(
+                coordinator: DaemonAppCoordinator.shared,
+                billViewModel: SessionBillWindowController.shared.viewModel
             )
             .preferredColorScheme(.dark)
             .environment(\.colorScheme, .dark)
+
+            let hostingController = NSHostingController(rootView: contentView)
+            self.popover.contentSize = NSSize(width: 336, height: 320)
+            self.popover.behavior = .transient
+            self.popover.animates = true
+            self.popover.appearance = NSAppearance(named: .darkAqua)
+            self.popover.contentViewController = hostingController
         }
-        .menuBarExtraStyle(.window)
+    }
+
+    public func updateIcon(killSwitchTripped: Bool) {
+        DispatchQueue.main.async {
+            let symbolName = killSwitchTripped ? "exclamationmark.octagon.fill" : "sparkles"
+            if let button = self.statusItem?.button {
+                button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "OpenComputerUse")
+                button.image?.isTemplate = true
+            }
+        }
+    }
+
+    @objc public func togglePopover(_ sender: AnyObject?) {
+        if popover.isShown {
+            closePopover()
+        } else {
+            showPopover()
+        }
+    }
+
+    public func showPopover() {
+        DispatchQueue.main.async {
+            guard let button = self.statusItem?.button else { return }
+            DaemonAppCoordinator.shared.refreshPermissions()
+            SessionBillWindowController.shared.viewModel.refreshFromDisk()
+            NSApp.activate(ignoringOtherApps: true)
+            self.popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            self.popover.contentViewController?.view.window?.makeKey()
+
+            if self.globalClickMonitor == nil {
+                self.globalClickMonitor = NSEvent.addGlobalMonitorForEvents(
+                    matching: [.leftMouseDown, .rightMouseDown]
+                ) { [weak self] _ in
+                    self?.closePopover()
+                }
+            }
+        }
+    }
+
+    public func closePopover() {
+        DispatchQueue.main.async {
+            if self.popover.isShown {
+                self.popover.performClose(nil)
+            }
+            if let monitor = self.globalClickMonitor {
+                NSEvent.removeMonitor(monitor)
+                self.globalClickMonitor = nil
+            }
+        }
     }
 }
 
 private struct MenuBarPopupContentView: View {
     @ObservedObject var coordinator: DaemonAppCoordinator
     @ObservedObject var billViewModel: SessionBillViewModel
-    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         ZStack {
@@ -309,7 +390,7 @@ private struct MenuBarPopupContentView: View {
 
                 // 3. Primary Action: Open Main Dashboard Window ("电脑操控中心") & Dismiss Popup
                 Button(action: {
-                    dismiss()
+                    StatusBarPopoverController.shared.closePopover()
                     MainDashboardWindowController.shared.showWindow(section: .control)
                 }) {
                     HStack(spacing: 8) {
@@ -339,7 +420,7 @@ private struct MenuBarPopupContentView: View {
                 .buttonStyle(.plain)
 
                 Button(action: {
-                    dismiss()
+                    StatusBarPopoverController.shared.closePopover()
                     MainDashboardWindowController.shared.showWindow(section: .history)
                 }) {
                     HStack(spacing: 8) {
