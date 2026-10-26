@@ -63,59 +63,71 @@ func renderIconImage(pixelSize: Int) -> NSImage {
         ctx.drawRadialGradient(coralOrb, startCenter: c2, startRadius: 0, endCenter: c2, endRadius: rect.width * 0.68, options: [])
     }
 
-    // 4. Subtle Gemini 4-point Sparkle Star in Upper-Right Quadrant
-    let starCenter = CGPoint(x: rect.minX + rect.width * 0.68, y: rect.minY + rect.height * 0.68)
-    let starR = rect.width * 0.145
-    let starCurvature = starR * 0.16
-    let starPath = CGMutablePath()
-    let topPt = CGPoint(x: starCenter.x, y: starCenter.y + starR)
-    let rightPt = CGPoint(x: starCenter.x + starR, y: starCenter.y)
-    let bottomPt = CGPoint(x: starCenter.x, y: starCenter.y - starR)
-    let leftPt = CGPoint(x: starCenter.x - starR, y: starCenter.y)
-
-    starPath.move(to: topPt)
-    starPath.addQuadCurve(to: rightPt, control: CGPoint(x: starCenter.x + starCurvature, y: starCenter.y + starCurvature))
-    starPath.addQuadCurve(to: bottomPt, control: CGPoint(x: starCenter.x + starCurvature, y: starCenter.y - starCurvature))
-    starPath.addQuadCurve(to: leftPt, control: CGPoint(x: starCenter.x - starCurvature, y: starCenter.y - starCurvature))
-    starPath.addQuadCurve(to: topPt, control: CGPoint(x: starCenter.x - starCurvature, y: starCenter.y + starCurvature))
-    starPath.closeSubpath()
-
-    ctx.saveGState()
-    ctx.addPath(starPath)
-    ctx.clip()
+    // 4. Companion Gemini 4-point Sparkle Stars (Upper-Right & Upper-Middle)
     let auroraColors = [
         CGColor(red: 0.40, green: 0.72, blue: 1.00, alpha: 1.0),
         CGColor(red: 0.26, green: 0.52, blue: 0.96, alpha: 1.0),
         CGColor(red: 0.61, green: 0.45, blue: 0.80, alpha: 1.0),
         CGColor(red: 0.85, green: 0.40, blue: 0.44, alpha: 1.0)
     ] as CFArray
-    if let auroraGrad = CGGradient(colorsSpace: colorSpace, colors: auroraColors, locations: [0.0, 0.35, 0.70, 1.0]) {
-        ctx.drawLinearGradient(
-            auroraGrad,
-            start: CGPoint(x: starCenter.x - starR, y: starCenter.y + starR),
-            end: CGPoint(x: starCenter.x + starR, y: starCenter.y - starR),
-            options: []
-        )
-    }
-    ctx.restoreGState()
 
-    // 5. Central Aerodynamic Gemini Cyber-Blade Pointer
-    let tip = CGPoint(x: rect.minX + rect.width * 0.26, y: rect.minY + rect.height * 0.74)
-    let wingRight = CGPoint(x: rect.minX + rect.width * 0.74, y: rect.minY + rect.height * 0.46)
-    let notch = CGPoint(x: rect.minX + rect.width * 0.49, y: rect.minY + rect.height * 0.44)
-    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.41, y: rect.minY + rect.height * 0.22)
+    func drawSparkleStar(center: CGPoint, radius: CGFloat, fillWhite: Bool = false) {
+        let curvature = radius * 0.20
+        let starPath = CGMutablePath()
+        let topPt = CGPoint(x: center.x, y: center.y + radius)
+        let rightPt = CGPoint(x: center.x + radius, y: center.y)
+        let bottomPt = CGPoint(x: center.x, y: center.y - radius)
+        let leftPt = CGPoint(x: center.x - radius, y: center.y)
+
+        starPath.move(to: topPt)
+        starPath.addQuadCurve(to: rightPt, control: CGPoint(x: center.x + curvature, y: center.y + curvature))
+        starPath.addQuadCurve(to: bottomPt, control: CGPoint(x: center.x + curvature, y: center.y - curvature))
+        starPath.addQuadCurve(to: leftPt, control: CGPoint(x: center.x - curvature, y: center.y - curvature))
+        starPath.addQuadCurve(to: topPt, control: CGPoint(x: center.x - curvature, y: center.y + curvature))
+        starPath.closeSubpath()
+
+        ctx.saveGState()
+        ctx.addPath(starPath)
+        if fillWhite {
+            ctx.setFillColor(CGColor(red: 0.92, green: 0.96, blue: 1.0, alpha: 0.95))
+            ctx.fillPath()
+        } else {
+            ctx.clip()
+            if let auroraGrad = CGGradient(colorsSpace: colorSpace, colors: auroraColors, locations: [0.0, 0.35, 0.70, 1.0]) {
+                ctx.drawLinearGradient(
+                    auroraGrad,
+                    start: CGPoint(x: center.x - radius, y: center.y + radius),
+                    end: CGPoint(x: center.x + radius, y: center.y - radius),
+                    options: []
+                )
+            }
+        }
+        ctx.restoreGState()
+    }
+
+    // Medium companion sparkle star (upper-right)
+    drawSparkleStar(
+        center: CGPoint(x: rect.minX + rect.width * 0.74, y: rect.minY + rect.height * 0.72),
+        radius: rect.width * 0.14
+    )
+    // Small companion sparkle star (top-middle accent)
+    drawSparkleStar(
+        center: CGPoint(x: rect.minX + rect.width * 0.50, y: rect.minY + rect.height * 0.82),
+        radius: rect.width * 0.072,
+        fillWhite: true
+    )
+
+    // 5. Primary Element: Aerodynamic Tailless Gemini Cyber-Blade Cursor (Replacing the largest star)
+    let tip = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY + rect.height * 0.80)
+    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.27, y: rect.minY + rect.height * 0.16)
+    let notch = CGPoint(x: rect.minX + rect.width * 0.47, y: rect.minY + rect.height * 0.38)
+    let wingRight = CGPoint(x: rect.minX + rect.width * 0.80, y: rect.minY + rect.height * 0.46)
 
     let pointerPath = CGMutablePath()
     pointerPath.move(to: tip)
+    pointerPath.addLine(to: wingLeft)
+    pointerPath.addLine(to: notch)
     pointerPath.addLine(to: wingRight)
-    pointerPath.addQuadCurve(
-        to: notch,
-        control: CGPoint(x: rect.minX + rect.width * 0.57, y: rect.minY + rect.height * 0.46)
-    )
-    pointerPath.addQuadCurve(
-        to: wingLeft,
-        control: CGPoint(x: rect.minX + rect.width * 0.46, y: rect.minY + rect.height * 0.35)
-    )
     pointerPath.closeSubpath()
 
     // Pointer drop shadow & aurora glow

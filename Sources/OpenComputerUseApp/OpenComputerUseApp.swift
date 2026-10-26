@@ -166,7 +166,7 @@ public final class StatusBarPopoverController: NSObject, @unchecked Sendable {
 
             let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
             if let button = item.button {
-                button.image = NSImage(systemSymbolName: "sparkles", accessibilityDescription: "OpenComputerUse")
+                button.image = GeminiBrandIconRenderer.statusBarImage(pointSize: 18)
                 button.image?.isTemplate = true
                 button.target = self
                 button.action = #selector(self.togglePopover(_:))
@@ -191,10 +191,14 @@ public final class StatusBarPopoverController: NSObject, @unchecked Sendable {
 
     public func updateIcon(killSwitchTripped: Bool) {
         DispatchQueue.main.async {
-            let symbolName = killSwitchTripped ? "exclamationmark.octagon.fill" : "sparkles"
             if let button = self.statusItem?.button {
-                button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "OpenComputerUse")
-                button.image?.isTemplate = true
+                if killSwitchTripped {
+                    button.image = NSImage(systemSymbolName: "exclamationmark.octagon.fill", accessibilityDescription: "OpenComputerUse")
+                    button.image?.isTemplate = true
+                } else {
+                    button.image = GeminiBrandIconRenderer.statusBarImage(pointSize: 18)
+                    button.image?.isTemplate = true
+                }
             }
         }
     }

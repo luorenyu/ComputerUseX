@@ -79,7 +79,7 @@ public enum GeminiPalette {
     }
 }
 
-// MARK: - Iconic 4-Point Curved Gemini Sparkle Shape (✦)
+// MARK: - Iconic 4-Point Curved Gemini Sparkle Shape (✦) & Unified "Cursor + Sparkles" Brand Icon
 
 public struct GeminiSparkleShape: Shape {
     public init() {}
@@ -121,7 +121,29 @@ public struct GeminiSparkleShape: Shape {
     }
 }
 
-/// Animated Google Gemini 4-point sparkle icon with ambient radial halo.
+/// Proportional tailless aerodynamic cursor blade used inside the "Cursor + Sparkles" brand icon.
+public struct GeminiCursorIconBladeShape: Shape {
+    public init() {}
+
+    public func path(in rect: CGRect) -> Path {
+        let w = rect.width
+        let h = rect.height
+        var path = Path()
+        // Sharp top-left apex
+        path.move(to: CGPoint(x: rect.minX + w * 0.06, y: rect.minY + h * 0.08))
+        // Left aerodynamic blade edge
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.14, y: rect.minY + h * 0.94))
+        // Swept inner chevron notch (tailless futuristic profile)
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.41, y: rect.minY + h * 0.66))
+        // Right high-speed wingtip
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.84, y: rect.minY + h * 0.54))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Unified "Cursor + Sparkles (星芒)" Brand Icon View:
+/// Replaces the largest star with our aerodynamic tailless Cursor blade paired with companion Gemini sparkle stars.
 public struct GeminiSparkleIcon: View {
     public var size: CGFloat = 18
     public var showHalo: Bool = true
@@ -151,16 +173,86 @@ public struct GeminiSparkleIcon: View {
                     .blur(radius: 2)
             }
 
-            GeminiSparkleShape()
-                .fill(GeminiPalette.auroraGradient)
-                .frame(width: size, height: size)
-                .overlay(
-                    GeminiSparkleShape()
-                        .stroke(Color.white.opacity(0.45), lineWidth: 0.6)
-                )
-                .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 4, x: 0, y: 0)
+            ZStack(alignment: .topLeading) {
+                // 1. Primary Element: Aerodynamic Tailless Cursor Blade
+                GeminiCursorIconBladeShape()
+                    .fill(GeminiPalette.auroraGradient)
+                    .overlay(
+                        GeminiCursorIconBladeShape()
+                            .stroke(Color.white.opacity(0.65), lineWidth: max(0.5, size * 0.04))
+                    )
+
+                // 2. Companion Medium 4-Point Gemini Sparkle (Top-Right)
+                GeminiSparkleShape()
+                    .fill(
+                        LinearGradient(
+                            colors: [GeminiPalette.skyBlue, GeminiPalette.violet, GeminiPalette.coral],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: size * 0.42, height: size * 0.42)
+                    .offset(x: size * 0.56, y: size * 0.02)
+
+                // 3. Companion Small 4-Point Gemini Sparkle (Upper-Middle Accent)
+                GeminiSparkleShape()
+                    .fill(Color.white.opacity(0.92))
+                    .frame(width: size * 0.22, height: size * 0.22)
+                    .offset(x: size * 0.36, y: size * 0.0)
+            }
+            .frame(width: size, height: size)
+            .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 4, x: 0, y: 0)
         }
         .frame(width: size, height: size)
+    }
+}
+
+/// Renders the unified "Cursor + Sparkles" icon as a native AppKit template `NSImage` for the macOS MenuBar (`NSStatusItem`).
+public enum GeminiBrandIconRenderer {
+    public static func statusBarImage(pointSize: CGFloat = 18) -> NSImage {
+        let img = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: true) { rect in
+            guard let ctx = NSGraphicsContext.current?.cgContext else { return false }
+            let w = rect.width
+            let h = rect.height
+
+            ctx.setAllowsAntialiasing(true)
+            ctx.setShouldAntialias(true)
+            ctx.setFillColor(NSColor.black.cgColor)
+
+            // 1. Primary Aerodynamic Tailless Cursor Blade (bottom-left to center)
+            let cursorPath = CGMutablePath()
+            cursorPath.move(to: CGPoint(x: w * 0.06, y: h * 0.10))
+            cursorPath.addLine(to: CGPoint(x: w * 0.14, y: h * 0.94))
+            cursorPath.addLine(to: CGPoint(x: w * 0.41, y: h * 0.66))
+            cursorPath.addLine(to: CGPoint(x: w * 0.84, y: h * 0.54))
+            cursorPath.closeSubpath()
+            ctx.addPath(cursorPath)
+            ctx.fillPath()
+
+            // Helper to draw a concave 4-point Gemini sparkle star in flipped coordinates
+            func addSparkle(center: CGPoint, radius: CGFloat) {
+                let inset = radius * 0.24
+                let p = CGMutablePath()
+                p.move(to: CGPoint(x: center.x, y: center.y - radius))
+                p.addQuadCurve(to: CGPoint(x: center.x + radius, y: center.y), control: CGPoint(x: center.x + inset, y: center.y - inset))
+                p.addQuadCurve(to: CGPoint(x: center.x, y: center.y + radius), control: CGPoint(x: center.x + inset, y: center.y + inset))
+                p.addQuadCurve(to: CGPoint(x: center.x - radius, y: center.y), control: CGPoint(x: center.x - inset, y: center.y + inset))
+                p.addQuadCurve(to: CGPoint(x: center.x, y: center.y - radius), control: CGPoint(x: center.x - inset, y: center.y - inset))
+                p.closeSubpath()
+                ctx.addPath(p)
+                ctx.fillPath()
+            }
+
+            // 2. Medium Companion Sparkle (Top-Right)
+            addSparkle(center: CGPoint(x: w * 0.77, y: h * 0.24), radius: w * 0.21)
+
+            // 3. Small Companion Sparkle (Upper-Middle)
+            addSparkle(center: CGPoint(x: w * 0.47, y: h * 0.12), radius: w * 0.11)
+
+            return true
+        }
+        img.isTemplate = true
+        return img
     }
 }
 

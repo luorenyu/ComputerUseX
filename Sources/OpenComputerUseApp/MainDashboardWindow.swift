@@ -922,9 +922,12 @@ struct MainDashboardRootView: View {
 
                                             VStack(alignment: .leading, spacing: 2) {
                                                 HStack(spacing: 8) {
-                                                    Text("✦ \(bill.agentName)")
-                                                        .font(.system(size: 13.5, weight: .bold))
-                                                        .foregroundColor(.white)
+                                                    HStack(spacing: 5) {
+                                                        GeminiSparkleIcon(size: 13, showHalo: false)
+                                                        Text(bill.agentName)
+                                                            .font(.system(size: 13.5, weight: .bold))
+                                                            .foregroundColor(.white)
+                                                    }
                                                     Text(bill.modelName)
                                                         .font(.system(size: 11.5, weight: .semibold, design: .monospaced))
                                                         .foregroundColor(GeminiPalette.skyBlue)
@@ -978,9 +981,7 @@ struct MainDashboardRootView: View {
                                             Spacer()
 
                                             HStack(spacing: 5) {
-                                                Image(systemName: "sparkles")
-                                                    .font(.system(size: 11))
-                                                    .foregroundColor(GeminiPalette.violet)
+                                                GeminiSparkleIcon(size: 12, showHalo: false)
                                                 Text("共 \(bill.totalTokens) Tokens (输入 \(bill.inputTokens) / 输出 \(bill.outputTokens))")
                                                     .font(.system(size: 11.5, weight: .medium, design: .monospaced))
                                                     .foregroundColor(.white.opacity(0.82))
