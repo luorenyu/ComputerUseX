@@ -37,7 +37,7 @@
 
 ### 1. 编译并一键安装
 ```bash
-git clone https://github.com/your-org/OpenComputerUse.git
+git clone https://github.com/luorenyu/OpenComputerUse.git
 cd OpenComputerUse
 ./scripts/install.sh
 ```
@@ -65,10 +65,26 @@ ocu bill --finish --agent "Antigravity" --model "Gemini 4 Argon Medium"
 
 ---
 
-## 🧪 单元测试与开源协议
+## 🧪 单元测试
 
 ```bash
 swift test
 ```
+
+---
+
+## 📈 Star History
+
+<a href="https://star-history.com/#luorenyu/OpenComputerUse&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date" />
+ </picture>
+</a>
+
+---
+
+## 📄 开源协议
 
 本项目基于 [MIT License](./LICENSE) 开源。

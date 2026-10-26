@@ -64,7 +64,7 @@ Unlike screenshot-only Computer Use wrappers that hijack your physical mouse, ya
 
 ### 1. Build & Install
 ```bash
-git clone https://github.com/your-org/OpenComputerUse.git
+git clone https://github.com/luorenyu/OpenComputerUse.git
 cd OpenComputerUse
 ./scripts/install.sh
 ```
@@ -128,10 +128,26 @@ Add to your MCP configuration (`mcp_config.json` or `claude_desktop_config.json`
 
 ---
 
-## 🧪 Testing & License
+## 🧪 Testing
 
 ```bash
 swift test
 ```
+
+---
+
+## 📈 Star History
+
+<a href="https://star-history.com/#luorenyu/OpenComputerUse&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=luorenyu/OpenComputerUse&type=Date" />
+ </picture>
+</a>
+
+---
+
+## 📄 License
 
 Licensed under the [MIT License](./LICENSE).
