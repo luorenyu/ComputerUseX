@@ -219,6 +219,12 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     if step.virtualCursor == nil {
                         step.virtualCursor = request.virtualCursor
                     }
+                    if step.agentName == nil {
+                        step.agentName = request.agentName
+                    }
+                    if step.modelName == nil {
+                        step.modelName = request.modelName
+                    }
                     let stepResp = execute(step, isDaemonContext: isDaemonContext)
                     if !stepResp.ok {
                         return IPCResponse(

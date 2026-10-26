@@ -51,14 +51,13 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             .statusPill(title: "🔍 正在扫描界面元素 (Snapshot)...", subtitle: appName ?? "当前窗口")
         )
 
-        // 1. Scan Accessibility Tree
+        // 1. Scan Accessibility Tree (and auto-unminimize in background if target app's window was minimized to Dock)
         var axScan = AXScanner.shared.scanApplication(
             appNameFilter: appName,
             preferredWindowID: preferredWindowID,
             windowTitleFilter: windowTitleFilter
         )
-        if axScan.pid > 0 && axScan.windowFrame == nil {
-            VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid)
+        if axScan.pid > 0 && VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid) {
             axScan = AXScanner.shared.scanApplication(
                 appNameFilter: appName,
                 preferredWindowID: preferredWindowID,

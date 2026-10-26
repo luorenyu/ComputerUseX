@@ -232,6 +232,18 @@ public final class KeyboardController: @unchecked Sendable {
         if submit {
             Thread.sleep(forTimeInterval: 0.05)
             postKeyCode(36, flags: [], targetPid: targetPid) // Return key
+            if hasOffset,
+               let targetRef = target,
+               let anchorEl = try? ElementSnapshotStore.shared.resolveTarget(targetRef),
+               (anchorEl.label.contains("发送") || anchorEl.label.lowercased() == "send") {
+                Thread.sleep(forTimeInterval: 0.06)
+                _ = try? MouseController.shared.click(
+                    target: anchorEl.ref,
+                    button: .left,
+                    clickCount: 1,
+                    virtualCursor: isVirtual
+                )
+            }
         }
 
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -247,14 +259,6 @@ public final class KeyboardController: @unchecked Sendable {
 
     private func resolveTargetPid(forVirtualMode isVirtual: Bool) -> Int32? {
         guard isVirtual else { return nil }
-        // If the target window is visible/unoccluded at the virtual cursor location, prefer standard HID event tap
-        // (since performBackgroundClick already focused the target window at that point while preserving physical mouse).
-        let loc = MouseController.shared.currentVirtualOrPhysicalLocation
-        if let ctx = MouseController.shared.lastResolvedTargetContext,
-           let topWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(at: loc),
-           topWin.pid == ctx.pid {
-            return nil
-        }
         let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
         if let ctxPid = MouseController.shared.lastResolvedTargetContext?.pid, ctxPid != frontPid {
             return ctxPid
@@ -266,6 +270,30 @@ public final class KeyboardController: @unchecked Sendable {
     }
 
     private func injectTextViaSafePasteboardOrUnicode(_ text: String, targetPid: Int32?) {
+        // When typing into a background application (targetPid != nil), inject Unicode key events directly to `pid`
+        // (matching Codex `SynthesizedEvent.type(string:)`) because background apps do not own the active macOS
+        // menu bar to route Cmd+V `performKeyEquivalent:`, and this avoids touching the user's clipboard!
+        if let pid = targetPid {
+            let utf16 = Array(text.utf16)
+            let chunkSize = 20
+            var idx = 0
+            while idx < utf16.count {
+                let end = min(idx + chunkSize, utf16.count)
+                var slice = Array(utf16[idx..<end])
+                if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                   let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                    down.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    up.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                    down.postToPid(pid)
+                    Thread.sleep(forTimeInterval: 0.012)
+                    up.postToPid(pid)
+                    Thread.sleep(forTimeInterval: 0.012)
+                }
+                idx = end
+            }
+            return
+        }
+
         let pasteboard = NSPasteboard.general
         let previousString = pasteboard.string(forType: .string)
 

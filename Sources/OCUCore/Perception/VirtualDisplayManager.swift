@@ -48,24 +48,32 @@ public final class VirtualDisplayManager: @unchecked Sendable {
     /// Ensures that if a target application's windows are minimized to the Dock (`kAXMinimizedAttribute == true`)
     /// or the application is hidden (`NSRunningApplication.isHidden`), it is unminimized in the background
     /// without activating or stealing frontmost focus so `ScreenCaptureKit` can stream its window texture.
-    public func ensureWindowUnminimizedInBackground(pid: Int32) {
-        guard pid > 0 else { return }
+    @discardableResult
+    public func ensureWindowUnminimizedInBackground(pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        var changed = false
         if let runningApp = NSRunningApplication(processIdentifier: pid), runningApp.isHidden {
             runningApp.unhide()
+            changed = true
         }
         let appElem = AXUIElementCreateApplication(pid)
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElem, kAXWindowsAttribute as CFString, &windowsRef) == .success,
               let windows = windowsRef as? [AXUIElement] else {
-            return
+            return changed
         }
         for win in windows {
             var minRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(win, kAXMinimizedAttribute as CFString, &minRef) == .success,
                let isMin = minRef as? Bool, isMin {
                 AXUIElementSetAttributeValue(win, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+                changed = true
             }
         }
+        if changed {
+            Thread.sleep(forTimeInterval: 0.45)
+        }
+        return changed
     }
 
     /// Parks a target app's window into the "Ghost Space" peripheral sandbox zone (bottom-right edge of the display,
