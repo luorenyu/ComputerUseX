@@ -256,7 +256,42 @@ public enum GeminiBrandIconRenderer {
     }
 }
 
-// MARK: - Ambient Aurora Background Mesh (Gemini Desktop & Mobile Header Glow)
+// MARK: - Native AppKit Frosted Glass Visual Effect View
+
+public struct FrostedGlassVisualEffectView: NSViewRepresentable {
+    public var material: NSVisualEffectView.Material
+    public var blendingMode: NSVisualEffectView.BlendingMode
+    public var isEmphasized: Bool
+
+    public init(
+        material: NSVisualEffectView.Material = .hudWindow,
+        blendingMode: NSVisualEffectView.BlendingMode = .behindWindow,
+        isEmphasized: Bool = true
+    ) {
+        self.material = material
+        self.blendingMode = blendingMode
+        self.isEmphasized = isEmphasized
+    }
+
+    public func makeNSView(context: Context) -> NSVisualEffectView {
+        let view = NSVisualEffectView()
+        view.material = material
+        view.blendingMode = blendingMode
+        view.state = .active
+        view.isEmphasized = isEmphasized
+        view.appearance = NSAppearance(named: .darkAqua)
+        return view
+    }
+
+    public func updateNSView(_ nsView: NSVisualEffectView, context: Context) {
+        nsView.material = material
+        nsView.blendingMode = blendingMode
+        nsView.state = .active
+        nsView.isEmphasized = isEmphasized
+    }
+}
+
+// MARK: - Ambient Aurora Background Mesh with Frosted Glass (Gemini Desktop & Mobile Header Glow)
 
 public struct GeminiAmbientBackdropView: View {
     public var intensity: Double = 1.0
@@ -268,50 +303,58 @@ public struct GeminiAmbientBackdropView: View {
     public var body: some View {
         GeometryReader { geo in
             ZStack {
-                GeminiPalette.canvasDeep
+                // 1. Real macOS Behind-Window Frosted Glass Blur
+                FrostedGlassVisualEffectView(
+                    material: .hudWindow,
+                    blendingMode: .behindWindow,
+                    isEmphasized: true
+                )
 
-                // Top-left Gemini Blue-Violet Aurora Orb
+                // 2. Translucent Obsidian Glass Tint (lets blurred desktop wallpaper/windows diffuse through)
+                GeminiPalette.canvasDeep.opacity(0.60)
+
+                // 3. Top-left Gemini Blue-Violet Aurora Orb
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                GeminiPalette.blue.opacity(0.24 * intensity),
-                                GeminiPalette.indigo.opacity(0.12 * intensity),
+                                GeminiPalette.blue.opacity(0.28 * intensity),
+                                GeminiPalette.indigo.opacity(0.14 * intensity),
                                 Color.clear
                             ],
                             center: .center,
                             startRadius: 8,
-                            endRadius: max(180, geo.size.width * 0.42)
+                            endRadius: max(180, geo.size.width * 0.44)
                         )
                     )
                     .frame(width: max(280, geo.size.width * 0.65), height: max(280, geo.size.width * 0.65))
                     .position(x: geo.size.width * 0.18, y: 20)
-                    .blur(radius: 45)
+                    .blur(radius: 48)
 
-                // Top-right Gemini Violet-Coral Aurora Orb
+                // 4. Top-right Gemini Violet-Coral Aurora Orb
                 Circle()
                     .fill(
                         RadialGradient(
                             colors: [
-                                GeminiPalette.violet.opacity(0.22 * intensity),
-                                GeminiPalette.coral.opacity(0.14 * intensity),
+                                GeminiPalette.violet.opacity(0.25 * intensity),
+                                GeminiPalette.coral.opacity(0.16 * intensity),
                                 Color.clear
                             ],
                             center: .center,
                             startRadius: 8,
-                            endRadius: max(160, geo.size.width * 0.38)
+                            endRadius: max(160, geo.size.width * 0.40)
                         )
                     )
                     .frame(width: max(260, geo.size.width * 0.58), height: max(260, geo.size.width * 0.58))
                     .position(x: geo.size.width * 0.82, y: 40)
-                    .blur(radius: 50)
+                    .blur(radius: 52)
 
-                // Subtle bottom-center starlight reflection
+                // 5. Subtle bottom-center starlight reflection
                 Ellipse()
                     .fill(
                         RadialGradient(
                             colors: [
-                                GeminiPalette.skyBlue.opacity(0.10 * intensity),
+                                GeminiPalette.skyBlue.opacity(0.12 * intensity),
                                 Color.clear
                             ],
                             center: .center,
@@ -321,7 +364,22 @@ public struct GeminiAmbientBackdropView: View {
                     )
                     .frame(width: geo.size.width * 0.7, height: 160)
                     .position(x: geo.size.width * 0.5, y: geo.size.height)
-                    .blur(radius: 40)
+                    .blur(radius: 42)
+
+                // 6. Within-Window Frosted Glass Diffusion Veil + Top Specular Sheen
+                Rectangle()
+                    .fill(.ultraThinMaterial)
+                    .opacity(0.26)
+
+                LinearGradient(
+                    colors: [
+                        Color.white.opacity(0.06),
+                        Color.white.opacity(0.015),
+                        Color.clear
+                    ],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
             }
         }
         .ignoresSafeArea()

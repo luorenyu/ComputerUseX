@@ -140,7 +140,7 @@ public final class MainDashboardWindowController: @unchecked Sendable {
             self.viewModel.refresh()
 
             if self.window == nil {
-                let rect = NSRect(x: 0, y: 0, width: 760, height: 740)
+                let rect = NSRect(x: 0, y: 0, width: 860, height: 760)
                 let win = NSWindow(
                     contentRect: rect,
                     styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
@@ -151,8 +151,9 @@ public final class MainDashboardWindowController: @unchecked Sendable {
                 win.titlebarAppearsTransparent = true
                 win.titleVisibility = .hidden
                 win.appearance = NSAppearance(named: .darkAqua)
-                win.backgroundColor = NSColor(calibratedRed: 0.051, green: 0.059, blue: 0.082, alpha: 1.0)
-                win.minSize = NSSize(width: 680, height: 600)
+                win.isOpaque = false
+                win.backgroundColor = .clear
+                win.minSize = NSSize(width: 780, height: 620)
                 win.isReleasedWhenClosed = false
                 win.center()
                 win.contentView = NSHostingView(
@@ -424,43 +425,43 @@ private struct DashboardTabProbeRepresentable: NSViewRepresentable {
     }
 }
 
-// MARK: - Main Dashboard SwiftUI View (Google Gemini Desktop & Mobile Live Style)
+// MARK: - Main Dashboard SwiftUI View (Frosted Glass & Spacious Grid Layout)
 
 struct MainDashboardRootView: View {
     @ObservedObject var viewModel: MainDashboardViewModel
 
-    private let cardDark = GeminiPalette.surfaceCard.opacity(0.88)
-    private let cardBorder = GeminiPalette.cardBorderSubtle
+    private let cardDark = GeminiPalette.surfaceCard.opacity(0.54)
 
     var body: some View {
         ZStack {
-            // 1. Google Gemini Ambient Aurora Backdrop (Diffused Blue / Violet / Coral Orbs)
+            // 1. Frosted Glass + Ambient Aurora Backdrop
             GeminiAmbientBackdropView(intensity: 1.15)
 
             VStack(alignment: .leading, spacing: 0) {
-                // Top Header Bar with Gemini Sparkle & Glowing Operator Capsule
-                HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 7) {
+                // Top Header Bar
+                HStack(alignment: .center, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 12) {
                             GeminiSparkleIcon(size: 26, showHalo: true)
                             Text("电脑操控")
-                                .font(.system(size: 28, weight: .bold))
+                                .font(.system(size: 26, weight: .bold))
                                 .foregroundColor(.white)
                         }
-                        Text("管理 AI Agent 如何使用你电脑上的其他应用程序与实时消费账单")
-                            .font(.system(size: 13.5, weight: .regular))
+                        Text("管理 AI Agent 应用操控权限、后台画中画预览策略与任务使用账单")
+                            .font(.system(size: 13, weight: .regular))
                             .foregroundColor(GeminiPalette.textSecondary)
+                            .lineLimit(1)
                     }
 
                     Spacer()
 
-                    // Operator Identity Capsule with Ambient Halo
+                    // Operator Identity Capsule with Frosted Glass & Ambient Halo
                     ZStack {
                         Capsule()
                             .fill(GeminiPalette.auroraHorizontalGradient)
                             .frame(width: 210, height: 42)
                             .blur(radius: 14)
-                            .opacity(0.28)
+                            .opacity(0.26)
 
                         HStack(spacing: 10) {
                             GeminiSparkleIcon(size: 16, showHalo: true)
@@ -468,131 +469,122 @@ struct MainDashboardRootView: View {
                                 Text("当前操作 Agent: \(viewModel.operatorAgent)")
                                     .font(.system(size: 11.5, weight: .semibold))
                                     .foregroundColor(.white.opacity(0.96))
+                                    .lineLimit(1)
                                 Text(viewModel.operatorModel)
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                                     .foregroundColor(GeminiPalette.textSkyBright)
+                                    .lineLimit(1)
                             }
                         }
-                        .padding(.horizontal, 15)
+                        .padding(.horizontal, 16)
                         .padding(.vertical, 8.5)
                         .background(
-                            Capsule()
-                                .fill(GeminiPalette.surfaceElevated.opacity(0.92))
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1.2)
-                                )
-                                .shadow(color: GeminiPalette.blue.opacity(0.25), radius: 10, y: 2)
+                            ZStack {
+                                Capsule().fill(.ultraThinMaterial)
+                                Capsule().fill(GeminiPalette.surfaceElevated.opacity(0.65))
+                                Capsule().strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1.1)
+                            }
+                            .shadow(color: GeminiPalette.blue.opacity(0.22), radius: 10, y: 2)
                         )
                     }
+                    .fixedSize(horizontal: true, vertical: false)
                 }
                 .padding(.horizontal, 36)
-                .padding(.top, 34)
-                .padding(.bottom, 20)
+                .padding(.top, 32)
+                .padding(.bottom, 18)
 
-                // Gemini Pill Segmented Section Switcher
+                // Segmented Section Switcher & Right Action Toolbar
                 HStack(spacing: 12) {
-                    ForEach(DashboardSection.allCases) { sec in
-                        let isSelected = (viewModel.selectedSection == sec)
-                        Button(action: {
-                            withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
-                                viewModel.selectedSection = sec
-                            }
-                        }) {
-                            HStack(spacing: 8) {
-                                if isSelected {
-                                    GeminiSparkleIcon(size: 13, showHalo: false)
-                                } else {
-                                    Image(systemName: sec == .control ? "slider.horizontal.3" : "doc.text.magnifyingglass")
-                                        .font(.system(size: 12.5, weight: .semibold))
+                    // Left: Unified Frosted-Glass Segmented Tab Track
+                    HStack(spacing: 6) {
+                        ForEach(DashboardSection.allCases) { sec in
+                            let isSelected = (viewModel.selectedSection == sec)
+                            Button(action: {
+                                withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                                    viewModel.selectedSection = sec
                                 }
-                                Text(sec.rawValue)
-                                    .font(.system(size: 13, weight: .semibold))
-                                if sec == .history && !viewModel.bills.isEmpty {
-                                    Text("\(viewModel.bills.count)")
-                                        .font(.system(size: 10.5, weight: .bold, design: .monospaced))
-                                        .padding(.horizontal, 6.5)
-                                        .padding(.vertical, 1.5)
-                                        .background(
-                                            Capsule().fill(isSelected ? GeminiPalette.blue.opacity(0.32) : Color.white.opacity(0.10))
-                                        )
-                                }
-                            }
-                            .foregroundColor(isSelected ? .white : .white.opacity(0.62))
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 8.5)
-                            .background(
-                                Capsule()
-                                    .fill(isSelected ? GeminiPalette.surfaceElevated : GeminiPalette.surfaceCard.opacity(0.55))
-                                    .overlay(
-                                        Capsule()
-                                            .strokeBorder(
-                                                isSelected
-                                                    ? AnyShapeStyle(GeminiPalette.auroraGradient)
-                                                    : AnyShapeStyle(Color.white.opacity(0.08)),
-                                                lineWidth: isSelected ? 1.4 : 1.0
+                            }) {
+                                HStack(spacing: 7) {
+                                    if isSelected {
+                                        GeminiSparkleIcon(size: 13, showHalo: false)
+                                    } else {
+                                        Image(systemName: sec == .control ? "slider.horizontal.3" : "doc.text.magnifyingglass")
+                                            .font(.system(size: 12.5, weight: .semibold))
+                                    }
+                                    Text(sec.rawValue)
+                                        .font(.system(size: 13, weight: .semibold))
+                                        .lineLimit(1)
+                                    if sec == .history && !viewModel.bills.isEmpty {
+                                        Text("\(viewModel.bills.count)")
+                                            .font(.system(size: 10.5, weight: .bold, design: .monospaced))
+                                            .padding(.horizontal, 6.5)
+                                            .padding(.vertical, 1.5)
+                                            .background(
+                                                Capsule().fill(isSelected ? GeminiPalette.blue.opacity(0.34) : Color.white.opacity(0.10))
                                             )
-                                    )
+                                    }
+                                }
+                                .fixedSize(horizontal: true, vertical: false)
+                                .foregroundColor(isSelected ? .white : .white.opacity(0.66))
+                                .padding(.horizontal, 18)
+                                .padding(.vertical, 8)
+                                .background(
+                                    ZStack {
+                                        if isSelected {
+                                            Capsule().fill(.ultraThinMaterial)
+                                            Capsule().fill(GeminiPalette.surfaceElevated.opacity(0.78))
+                                            Capsule().strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.3)
+                                        }
+                                    }
                                     .shadow(
-                                        color: isSelected ? GeminiPalette.blue.opacity(0.35) : Color.clear,
-                                        radius: 10,
+                                        color: isSelected ? GeminiPalette.blue.opacity(0.32) : Color.clear,
+                                        radius: 8,
                                         y: 2
                                     )
-                            )
-                            .background(DashboardTabProbeRepresentable(section: sec))
+                                )
+                                .background(DashboardTabProbeRepresentable(section: sec))
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
+                    .padding(4)
+                    .background(
+                        ZStack {
+                            Capsule().fill(.ultraThinMaterial)
+                            Capsule().fill(Color.black.opacity(0.24))
+                            Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
+                        }
+                    )
 
                     Spacer()
 
-                    // One-click Install Codex Plugin / Skill / MCP Button
-                    Button(action: {
-                        DaemonAppCoordinator.shared.installToAllAgentsAndCodexPlugin()
-                    }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "puzzlepiece.extension.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(GeminiPalette.textMintBright)
-                            Text("安装至 Codex / Claude")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.white.opacity(0.92))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule()
-                                .fill(GeminiPalette.surfaceCard)
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-                        )
-                    }
-                    .buttonStyle(.plain)
-                    .help("一键将 ComputerUseX 插件、Skill 与 MCP Server 集成到 OpenAI Codex、Claude、Gemini 和 Cursor")
-
-                    // One-click Copy MCP Config Button
+                    // Right Action Toolbar: Copy MCP Config + Demo + Icon-Only Refresh
                     Button(action: {
                         DaemonAppCoordinator.shared.copyMCPConfigToClipboard()
                     }) {
-                        HStack(spacing: 5) {
+                        HStack(spacing: 6) {
                             Image(systemName: "doc.on.doc")
-                                .font(.system(size: 11, weight: .semibold))
+                                .font(.system(size: 11.5, weight: .semibold))
                                 .foregroundColor(GeminiPalette.textSkyBright)
                             Text("复制 MCP 配置")
-                                .font(.system(size: 12, weight: .medium))
+                                .font(.system(size: 12.5, weight: .medium))
+                                .lineLimit(1)
                         }
+                        .fixedSize(horizontal: true, vertical: false)
                         .foregroundColor(.white.opacity(0.92))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 8)
                         .background(
-                            Capsule()
-                                .fill(GeminiPalette.surfaceCard)
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                            ZStack {
+                                Capsule().fill(.ultraThinMaterial)
+                                Capsule().fill(cardDark)
+                                Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                            }
                         )
                     }
                     .buttonStyle(.plain)
                     .help("一键复制 MCP Server 配置 JSON 到剪贴板")
 
-                    // Demo Showcase Button in Main Settings Window
                     Button(action: {
                         DaemonAppCoordinator.shared.runVisualHUDDemo()
                     }) {
@@ -602,43 +594,43 @@ struct MainDashboardRootView: View {
                                 .font(.system(size: 10, weight: .bold))
                                 .foregroundColor(GeminiPalette.textSkyBright)
                             Text("演示效果 (Demo)")
-                                .font(.system(size: 12, weight: .semibold))
+                                .font(.system(size: 12.5, weight: .semibold))
                                 .foregroundColor(.white)
+                                .lineLimit(1)
                         }
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .fixedSize(horizontal: true, vertical: false)
+                        .padding(.horizontal, 15)
+                        .padding(.vertical, 8)
                         .background(
                             ZStack {
-                                Capsule()
-                                    .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.28))
-                                Capsule()
-                                    .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.75), lineWidth: 1)
+                                Capsule().fill(.ultraThinMaterial)
+                                Capsule().fill(GeminiPalette.auroraHorizontalGradient.opacity(0.26))
+                                Capsule().strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.75), lineWidth: 1)
                             }
                         )
-                        .shadow(color: GeminiPalette.blue.opacity(0.32), radius: 8, y: 1)
+                        .shadow(color: GeminiPalette.blue.opacity(0.28), radius: 8, y: 1)
                     }
                     .buttonStyle(.plain)
-                    .help("演示 Google Gemini 极光光晕、统一流光指针与平滑贝塞尔轨迹")
+                    .help("在主控中心演示虚拟指针跨 Tab 点击切换动画")
 
+                    // Icon-Only Circular Refresh Button (No Text)
                     Button(action: {
                         viewModel.refresh()
                     }) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("刷新")
-                                .font(.system(size: 12, weight: .medium))
-                        }
-                        .foregroundColor(.white.opacity(0.88))
-                        .padding(.horizontal, 13)
-                        .padding(.vertical, 7)
-                        .background(
-                            Capsule()
-                                .fill(GeminiPalette.surfaceCard)
-                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-                        )
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.88))
+                            .frame(width: 34, height: 34)
+                            .background(
+                                ZStack {
+                                    Circle().fill(.ultraThinMaterial)
+                                    Circle().fill(cardDark)
+                                    Circle().strokeBorder(Color.white.opacity(0.14), lineWidth: 1)
+                                }
+                            )
                     }
                     .buttonStyle(.plain)
+                    .help("刷新控制面板与账单数据")
                 }
                 .padding(.horizontal, 36)
                 .padding(.bottom, 16)
@@ -648,9 +640,9 @@ struct MainDashboardRootView: View {
                         LinearGradient(
                             colors: [
                                 Color.clear,
-                                GeminiPalette.blue.opacity(0.35),
-                                GeminiPalette.violet.opacity(0.35),
-                                GeminiPalette.coral.opacity(0.25),
+                                GeminiPalette.blue.opacity(0.32),
+                                GeminiPalette.violet.opacity(0.32),
+                                GeminiPalette.coral.opacity(0.22),
                                 Color.clear
                             ],
                             startPoint: .leading,
@@ -676,11 +668,21 @@ struct MainDashboardRootView: View {
         .coordinateSpace(name: "DashboardRootSpace")
     }
 
-    // MARK: - Section 1: Control & App Permissions (Codex Image 1 Style)
+    // MARK: - Section 1: Control & App Permissions (Spacious 2x2 Strategy Grid + 3-Col App Grid)
 
     private var controlAndAppsView: some View {
-        VStack(alignment: .leading, spacing: 24) {
-            // 0. Permission Onboarding Banner (if Accessibility or Screen Recording is missing)
+        let twoColumns = [
+            GridItem(.flexible(), spacing: 16),
+            GridItem(.flexible(), spacing: 16)
+        ]
+        let threeColumns = [
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12),
+            GridItem(.flexible(), spacing: 12)
+        ]
+
+        return VStack(alignment: .leading, spacing: 26) {
+            // 0. Permission Onboarding Banner (only shown if Accessibility or Screen Recording is missing)
             if !viewModel.accessibilityGranted || !viewModel.screenRecordingGranted {
                 HStack(spacing: 14) {
                     ZStack {
@@ -734,37 +736,44 @@ struct MainDashboardRootView: View {
                 }
                 .padding(16)
                 .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(GeminiPalette.surfaceElevated)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(GeminiPalette.peach.opacity(0.45), lineWidth: 1)
-                        )
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous).fill(cardDark)
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .strokeBorder(GeminiPalette.peach.opacity(0.45), lineWidth: 1)
+                    }
                 )
             }
 
-            // 1. "控制" Section
-            VStack(alignment: .leading, spacing: 10) {
-                Text("控制")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundColor(.white.opacity(0.9))
+            // 1. Core Control Strategy (2x2 Frosted Glass Grid)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 8) {
+                    Text("核心操控策略")
+                        .font(.system(size: 14.5, weight: .bold))
+                        .foregroundColor(.white.opacity(0.92))
+                    Text("配置后台零焦点操控、画中画预览与跨应用授权行为")
+                        .font(.system(size: 12))
+                        .foregroundColor(GeminiPalette.textSecondary)
+                }
 
-                VStack(spacing: 0) {
-                    // Row 1: 任意应用
-                    ControlRowView(
+                LazyVGrid(columns: twoColumns, spacing: 14) {
+                    // Card 1: 任意应用访问
+                    StrategyGridCardView(
                         iconView: AnyView(
                             ZStack {
                                 GeminiPalette.auroraGradient
-                                Image(systemName: "CursorArrowRays")
-                                    .font(.system(size: 16, weight: .bold))
+                                Image(systemName: "checkmark.shield.fill")
+                                    .font(.system(size: 16, weight: .semibold))
                                     .foregroundColor(.white)
                             }
-                            .frame(width: 34, height: 34)
-                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            .shadow(color: GeminiPalette.blue.opacity(0.45), radius: 6)
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: GeminiPalette.blue.opacity(0.35), radius: 6)
                         ),
-                        title: "任意应用",
-                        subtitle: "允许 \(viewModel.operatorAgent) 控制你电脑上的应用（关闭后首次访问未知应用将弹窗询问）",
+                        title: "任意应用访问",
+                        badgeText: viewModel.allowAnyApp ? "全局允许" : "白名单模式",
+                        badgeColor: viewModel.allowAnyApp ? GeminiPalette.mintGreen : GeminiPalette.peach,
+                        subtitle: "允许 \(viewModel.operatorAgent) 直接操控桌面应用；关闭后首次访问未知应用将弹窗询问授权。",
                         trailing: AnyView(
                             Toggle("", isOn: Binding(
                                 get: { viewModel.allowAnyApp },
@@ -776,115 +785,23 @@ struct MainDashboardRootView: View {
                         )
                     )
 
-                    Divider().background(Color.white.opacity(0.07)).padding(.horizontal, 16)
-
-                    // Row 2: Google Chrome
-                    ControlRowView(
-                        iconView: AnyView(AppBadgeIcon(appName: "Google Chrome")),
-                        title: "Google Chrome",
-                        subtitleView: AnyView(
-                            HStack(spacing: 5) {
-                                Circle().fill(GeminiPalette.mintGreen).frame(width: 6, height: 6)
-                                    .shadow(color: GeminiPalette.mintGreen.opacity(0.7), radius: 4)
-                                Text("已启用零焦点 DOM / JS 浏览器控制桥接")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(GeminiPalette.textSecondary)
-                            }
-                        ),
-                        trailing: AnyView(
-                            HStack(spacing: 10) {
-                                Button(action: {
-                                    _ = try? AppWorkspaceController.shared.focusOrLaunchApp(identifierOrName: "Google Chrome", launchIfNeeded: true)
-                                }) {
-                                    Text("管理")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.9))
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 4)
-                                        .background(
-                                            Capsule()
-                                                .fill(Color.white.opacity(0.10))
-                                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
-                                        )
-                                }
-                                .buttonStyle(.plain)
-
-                                Toggle("", isOn: $viewModel.chromeBridgeEnabled)
-                                    .toggleStyle(.switch)
-                                    .tint(GeminiPalette.blue)
-                                    .labelsHidden()
-                            }
-                        )
-                    )
-
-                    Divider().background(Color.white.opacity(0.07)).padding(.horizontal, 16)
-
-                    // Row 3: 更多浏览器
-                    VStack(spacing: 0) {
-                        Button(action: {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                viewModel.showMoreBrowsers.toggle()
-                            }
-                        }) {
-                            ControlRowView(
-                                iconView: AnyView(
-                                    ZStack {
-                                        LinearGradient(colors: [GeminiPalette.skyBlue, GeminiPalette.blue], startPoint: .topLeading, endPoint: .bottomTrailing)
-                                        Image(systemName: "globe")
-                                            .font(.system(size: 17, weight: .semibold))
-                                            .foregroundColor(.white)
-                                    }
-                                    .frame(width: 34, height: 34)
-                                    .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                                ),
-                                title: "更多浏览器",
-                                subtitle: "为 Safari、Arc、Brave、Microsoft Edge 设置零焦点桥接扩展支持",
-                                trailing: AnyView(
-                                    Image(systemName: viewModel.showMoreBrowsers ? "chevron.up" : "chevron.down")
-                                        .font(.system(size: 13, weight: .semibold))
-                                        .foregroundColor(.white.opacity(0.55))
-                                )
-                            )
-                        }
-                        .buttonStyle(.plain)
-
-                        if viewModel.showMoreBrowsers {
-                            HStack(spacing: 14) {
-                                ForEach(["Safari", "Arc", "Brave Browser", "Microsoft Edge"], id: \.self) { bName in
-                                    HStack(spacing: 6) {
-                                        Circle().fill(GeminiPalette.mintGreen).frame(width: 6, height: 6)
-                                        Text(bName)
-                                            .font(.system(size: 11.5, weight: .medium))
-                                            .foregroundColor(.white.opacity(0.82))
-                                    }
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 5)
-                                    .background(Capsule().fill(Color.white.opacity(0.07)))
-                                }
-                                Spacer()
-                            }
-                            .padding(.horizontal, 62)
-                            .padding(.bottom, 12)
-                        }
-                    }
-
-                    Divider().background(Color.white.opacity(0.07)).padding(.horizontal, 16)
-
-                    // Row 4: 后台虚拟指针与持续预览小窗
-                    ControlRowView(
+                    // Card 2: 后台虚拟指针与实时预览窗
+                    StrategyGridCardView(
                         iconView: AnyView(
                             ZStack {
                                 LinearGradient(colors: [GeminiPalette.indigo, GeminiPalette.violet, GeminiPalette.coral], startPoint: .topLeading, endPoint: .bottomTrailing)
                                 Image(systemName: "pip.fill")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                     .foregroundColor(.white)
                             }
-                            .frame(width: 34, height: 34)
-                            .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                            .shadow(color: GeminiPalette.violet.opacity(0.45), radius: 6)
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: GeminiPalette.violet.opacity(0.35), radius: 6)
                         ),
-                        title: "后台虚拟指针与右下角实时预览窗",
-                        subtitle: "不抢占物理鼠标与前台焦点，在任务全程持续显示被操作软件的预览小窗直至任务结束",
+                        title: "后台虚拟指针与画中画预览",
+                        badgeText: "零焦点合成",
+                        badgeColor: GeminiPalette.skyBlue,
+                        subtitle: "不抢占物理鼠标与前台焦点，在任务执行期间于右下角持续显示被操作窗口实时画面。",
                         trailing: AnyView(
                             Toggle("", isOn: Binding(
                                 get: { viewModel.backgroundVirtualMode },
@@ -895,54 +812,62 @@ struct MainDashboardRootView: View {
                             .labelsHidden()
                         )
                     )
-                }
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(cardDark)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
-                        )
-                )
 
-                // Separate Card: 锁屏操作
-                ControlRowView(
-                    iconView: AnyView(
-                        ZStack {
-                            GeminiPalette.blue.opacity(0.22)
-                            Image(systemName: "lock.laptopcomputer")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundColor(GeminiPalette.skyBlue)
-                        }
-                        .frame(width: 34, height: 34)
-                        .clipShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-                    ),
-                    title: "锁屏与后台沙箱操作",
-                    subtitle: "允许 \(viewModel.operatorAgent) 在 Mac 锁定或应用最小化时在后台恢复并操控窗口",
-                    trailing: AnyView(
-                        Toggle("", isOn: $viewModel.lockScreenSandboxEnabled)
-                            .toggleStyle(.switch)
-                            .tint(GeminiPalette.blue)
-                            .labelsHidden()
-                    )
-                )
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(cardDark)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
+                    // Card 3: 浏览器免焦点 DOM / JS 桥接
+                    StrategyGridCardView(
+                        iconView: AnyView(AppBadgeIcon(appName: "Google Chrome")),
+                        title: "浏览器免焦点桥接",
+                        badgeText: "Chrome · Safari · Arc · Edge",
+                        badgeColor: GeminiPalette.mintGreen,
+                        subtitle: "无需将浏览器切到前台，直接读取打开的标签页、提取精简交互 DOM 或执行 JS 脚本。",
+                        trailing: AnyView(
+                            Toggle("", isOn: $viewModel.chromeBridgeEnabled)
+                                .toggleStyle(.switch)
+                                .tint(GeminiPalette.blue)
+                                .labelsHidden()
                         )
-                )
-                .padding(.top, 4)
+                    )
+
+                    // Card 4: 锁屏与后台边缘沙箱
+                    StrategyGridCardView(
+                        iconView: AnyView(
+                            ZStack {
+                                LinearGradient(colors: [GeminiPalette.skyBlue.opacity(0.85), GeminiPalette.blue], startPoint: .topLeading, endPoint: .bottomTrailing)
+                                Image(systemName: "macwindow.on.rectangle")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                        ),
+                        title: "后台沙箱与最小化恢复",
+                        badgeText: "Ghost Space",
+                        badgeColor: GeminiPalette.skyBlue,
+                        subtitle: "当目标窗口最小化或停靠在屏幕边缘沙箱时，支持在后台自动唤醒并完成感知与点击。",
+                        trailing: AnyView(
+                            Toggle("", isOn: $viewModel.lockScreenSandboxEnabled)
+                                .toggleStyle(.switch)
+                                .tint(GeminiPalette.blue)
+                                .labelsHidden()
+                        )
+                    )
+                }
             }
 
-            // 2. "始终允许的应用" Section (Matching Image 1 + Gemini Style)
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text("始终允许的应用")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white.opacity(0.9))
+            // 2. Always Allowed Applications (3-Column Compact Frosted Glass Grid)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .center) {
+                    HStack(spacing: 8) {
+                        Text("始终允许的应用")
+                            .font(.system(size: 14.5, weight: .bold))
+                            .foregroundColor(.white.opacity(0.92))
+                        Text("\(viewModel.allowedApps.count)")
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(GeminiPalette.textSkyBright)
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 2)
+                            .background(Capsule().fill(GeminiPalette.blue.opacity(0.22)))
+                    }
 
                     Spacer()
 
@@ -956,7 +881,7 @@ struct MainDashboardRootView: View {
                                 if viewModel.newAppInput.isEmpty {
                                     Text("输入应用名或 Bundle ID...")
                                         .font(.system(size: 12, weight: .medium))
-                                        .foregroundColor(Color.white.opacity(0.68))
+                                        .foregroundColor(Color.white.opacity(0.55))
                                         .allowsHitTesting(false)
                                 }
                                 TextField("", text: $viewModel.newAppInput)
@@ -972,15 +897,14 @@ struct MainDashboardRootView: View {
                             }
                         }
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 6.5)
+                        .padding(.vertical, 7)
                         .frame(width: 220)
                         .background(
-                            Capsule()
-                                .fill(GeminiPalette.surfaceElevated)
-                                .overlay(
-                                    Capsule()
-                                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
-                                )
+                            ZStack {
+                                Capsule().fill(.ultraThinMaterial)
+                                Capsule().fill(cardDark)
+                                Capsule().strokeBorder(Color.white.opacity(0.18), lineWidth: 1)
+                            }
                         )
 
                         Button(action: {
@@ -997,67 +921,61 @@ struct MainDashboardRootView: View {
                                 Text("添加应用")
                                     .font(.system(size: 12, weight: .semibold))
                             }
+                            .fixedSize(horizontal: true, vertical: false)
                             .foregroundColor(.white)
                             .padding(.horizontal, 14)
-                            .padding(.vertical, 6.5)
+                            .padding(.vertical, 7)
                             .background(
                                 ZStack {
-                                    Capsule()
-                                        .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.38))
-                                    Capsule()
-                                        .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.85), lineWidth: 1)
+                                    Capsule().fill(.ultraThinMaterial)
+                                    Capsule().fill(GeminiPalette.auroraHorizontalGradient.opacity(0.36))
+                                    Capsule().strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.82), lineWidth: 1)
                                 }
                             )
-                            .shadow(color: GeminiPalette.blue.opacity(0.38), radius: 8)
+                            .shadow(color: GeminiPalette.blue.opacity(0.32), radius: 6)
                         }
                         .buttonStyle(.plain)
                     }
                 }
 
-                VStack(spacing: 0) {
-                    ForEach(Array(viewModel.allowedApps.enumerated()), id: \.offset) { idx, appName in
-                        HStack(spacing: 14) {
+                LazyVGrid(columns: threeColumns, spacing: 12) {
+                    ForEach(Array(viewModel.allowedApps.enumerated()), id: \.offset) { _, appName in
+                        HStack(spacing: 11) {
                             AppBadgeIcon(appName: appName)
 
                             Text(appName)
-                                .font(.system(size: 13.5, weight: .medium, design: appName.contains(".") ? .monospaced : .default))
+                                .font(.system(size: 13, weight: .medium, design: appName.contains(".") ? .monospaced : .default))
                                 .foregroundColor(.white.opacity(0.92))
+                                .lineLimit(1)
 
-                            Spacer()
+                            Spacer(minLength: 4)
 
                             Button(action: {
                                 viewModel.removeAllowedApp(appName)
                             }) {
-                                ZStack {
-                                    Circle()
-                                        .fill(GeminiPalette.coral.opacity(0.16))
-                                        .frame(width: 28, height: 28)
-                                    Image(systemName: "trash")
-                                        .font(.system(size: 12, weight: .semibold))
-                                        .foregroundColor(GeminiPalette.coral)
-                                }
+                                Image(systemName: "xmark")
+                                    .font(.system(size: 10.5, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.48))
+                                    .frame(width: 24, height: 24)
+                                    .background(Circle().fill(Color.white.opacity(0.08)))
                             }
                             .buttonStyle(.plain)
                             .help("从始终允许列表中移除 \(appName)")
                         }
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 12)
-
-                        if idx + 1 < viewModel.allowedApps.count {
-                            Divider()
-                                .background(Color.white.opacity(0.07))
-                                .padding(.horizontal, 18)
-                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .fill(.ultraThinMaterial)
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .fill(cardDark)
+                                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                                    .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
+                            }
+                        )
                     }
                 }
-                .background(
-                    RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .fill(cardDark)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
-                        )
-                )
             }
         }
     }
@@ -1071,9 +989,9 @@ struct MainDashboardRootView: View {
         let sumTokens = viewModel.bills.reduce(0) { $0 + $1.totalTokens }
         let sumCostUSD = viewModel.bills.reduce(0.0) { $0 + $1.costUSD }
 
-        return VStack(alignment: .leading, spacing: 20) {
+        return VStack(alignment: .leading, spacing: 22) {
             // 1. Summary KPI Row
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 DashboardKPIBox(
                     title: "累计任务次数",
                     value: "\(totalSessions) 次",
@@ -1083,13 +1001,13 @@ struct MainDashboardRootView: View {
                 DashboardKPIBox(
                     title: "累计总耗时 / 工具耗时",
                     value: String(format: "%.1fs", sumTotalSec),
-                    subtitle: String(format: "ComputerUse工具调用: %.1fs", sumToolSec),
+                    subtitle: String(format: "工具执行耗时: %.1fs", sumToolSec),
                     accent: GeminiPalette.violet
                 )
                 DashboardKPIBox(
                     title: "累计消耗 Token",
                     value: "\(sumTokens)",
-                    subtitle: "含输入 Prompt 与界面快照输出",
+                    subtitle: "含输入与界面快照输出",
                     accent: GeminiPalette.coral
                 )
                 DashboardKPIBox(
@@ -1101,23 +1019,28 @@ struct MainDashboardRootView: View {
             }
 
             // 2. Session Bills List
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 6) {
                     GeminiSparkleIcon(size: 13, showHalo: false)
                     Text("每次任务完整使用账单 (\(viewModel.bills.count))")
-                        .font(.system(size: 14, weight: .bold))
-                        .foregroundColor(.white.opacity(0.9))
+                        .font(.system(size: 14.5, weight: .bold))
+                        .foregroundColor(.white.opacity(0.92))
                 }
 
                 if viewModel.bills.isEmpty {
                     Text("暂无历史账单记录。当 Agent 调用 ComputerUse 完成任务后将自动生成账单。")
                         .font(.system(size: 13))
                         .foregroundColor(.white.opacity(0.5))
-                        .padding(24)
+                        .padding(28)
                         .frame(maxWidth: .infinity, alignment: .center)
-                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(cardDark))
+                        .background(
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(.ultraThinMaterial)
+                                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(cardDark)
+                            }
+                        )
                 } else {
-                    VStack(spacing: 10) {
+                    VStack(spacing: 12) {
                         ForEach(viewModel.bills) { bill in
                             let isExpanded = viewModel.expandedBillIds.contains(bill.billId)
                             VStack(alignment: .leading, spacing: 0) {
@@ -1130,11 +1053,11 @@ struct MainDashboardRootView: View {
                                         }
                                     }
                                 }) {
-                                    VStack(alignment: .leading, spacing: 10) {
+                                    VStack(alignment: .leading, spacing: 12) {
                                         HStack {
                                             AppBadgeIcon(appName: bill.targetApps.first ?? "Finder")
 
-                                            VStack(alignment: .leading, spacing: 2) {
+                                            VStack(alignment: .leading, spacing: 3) {
                                                 HStack(spacing: 8) {
                                                     HStack(spacing: 5) {
                                                         GeminiSparkleIcon(size: 13, showHalo: false)
@@ -1156,6 +1079,7 @@ struct MainDashboardRootView: View {
                                                         Text("→ " + bill.targetApps.joined(separator: ", "))
                                                             .font(.system(size: 12, weight: .medium))
                                                             .foregroundColor(.white.opacity(0.75))
+                                                            .lineLimit(1)
                                                     }
                                                 }
 
@@ -1202,8 +1126,8 @@ struct MainDashboardRootView: View {
                                             }
                                         }
                                         .padding(.horizontal, 12)
-                                        .padding(.vertical, 7)
-                                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.045)))
+                                        .padding(.vertical, 7.5)
+                                        .background(RoundedRectangle(cornerRadius: 9, style: .continuous).fill(Color.white.opacity(0.05)))
                                     }
                                     .padding(16)
                                 }
@@ -1244,16 +1168,18 @@ struct MainDashboardRootView: View {
                                     }
                                     .padding(.horizontal, 16)
                                     .padding(.vertical, 12)
-                                    .background(Color.black.opacity(0.22))
+                                    .background(Color.black.opacity(0.18))
                                 }
                             }
                             .background(
-                                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                    .fill(cardDark)
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 16, style: .continuous)
-                                            .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
-                                    )
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(.ultraThinMaterial)
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .fill(cardDark)
+                                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                                        .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
+                                }
                             )
                         }
                     }
@@ -1263,36 +1189,61 @@ struct MainDashboardRootView: View {
     }
 }
 
-private struct ControlRowView: View {
+private struct StrategyGridCardView: View {
     let iconView: AnyView
     let title: String
-    var subtitle: String? = nil
-    var subtitleView: AnyView? = nil
+    let badgeText: String
+    let badgeColor: Color
+    let subtitle: String
     let trailing: AnyView
 
     var body: some View {
-        HStack(spacing: 14) {
-            iconView
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .center, spacing: 12) {
+                iconView
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundColor(.white)
-                if let subView = subtitleView {
-                    subView
-                } else if let sub = subtitle {
-                    Text(sub)
-                        .font(.system(size: 12))
-                        .foregroundColor(GeminiPalette.textSecondary)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+
+                    Text(badgeText)
+                        .font(.system(size: 10.5, weight: .semibold, design: .monospaced))
+                        .foregroundColor(badgeColor)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule()
+                                .fill(badgeColor.opacity(0.15))
+                                .overlay(Capsule().strokeBorder(badgeColor.opacity(0.32), lineWidth: 0.8))
+                        )
                 }
+
+                Spacer()
+
+                trailing
             }
 
-            Spacer()
-
-            trailing
+            Text(subtitle)
+                .font(.system(size: 12))
+                .foregroundColor(GeminiPalette.textSecondary)
+                .lineSpacing(2)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 18)
-        .padding(.vertical, 14)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 108, alignment: .topLeading)
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(GeminiPalette.surfaceCard.opacity(0.54))
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
+            }
+        )
     }
 }
 
@@ -1304,14 +1255,14 @@ private struct AppBadgeIcon: View {
             Image(nsImage: nsImg)
                 .resizable()
                 .interpolation(.high)
-                .frame(width: 32, height: 32)
+                .frame(width: 28, height: 28)
         } else {
             ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(GeminiPalette.auroraGradient.opacity(0.28))
-                    .frame(width: 32, height: 32)
+                    .frame(width: 28, height: 28)
                 Text(String(appName.prefix(1)).uppercased())
-                    .font(.system(size: 14, weight: .bold, design: .rounded))
+                    .font(.system(size: 13, weight: .bold, design: .rounded))
                     .foregroundColor(.white.opacity(0.9))
             }
         }
@@ -1326,7 +1277,6 @@ private struct DashboardKPIBox: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Subtle Gemini radial corner halo inside each KPI card
             Circle()
                 .fill(
                     RadialGradient(
@@ -1340,12 +1290,13 @@ private struct DashboardKPIBox: View {
                 .offset(x: 24, y: -24)
                 .blur(radius: 10)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text(title)
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundColor(GeminiPalette.textSecondary)
+                    .lineLimit(1)
                 Text(value)
-                    .font(.system(size: 18, weight: .heavy, design: .monospaced))
+                    .font(.system(size: 20, weight: .heavy, design: .monospaced))
                     .foregroundColor(accent)
                     .shadow(color: accent.opacity(0.35), radius: 6)
                     .lineLimit(1)
@@ -1355,16 +1306,18 @@ private struct DashboardKPIBox: View {
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(14)
+            .padding(16)
         }
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(GeminiPalette.surfaceCard)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
-                )
+            ZStack {
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .fill(GeminiPalette.surfaceCard.opacity(0.54))
+                RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
+            }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
     }
 }
