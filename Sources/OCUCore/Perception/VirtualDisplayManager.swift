@@ -45,9 +45,9 @@ public final class VirtualDisplayManager: @unchecked Sendable {
         return NSClassFromString("CGVirtualDisplay") != nil && NSClassFromString("CGVirtualDisplayDescriptor") != nil
     }
 
-    /// Ensures that if a target application's windows are minimized to the Dock (`kAXMinimizedAttribute == true`)
-    /// or the application is hidden (`NSRunningApplication.isHidden`), it is unminimized in the background
-    /// without activating or stealing frontmost focus so `ScreenCaptureKit` can stream its window texture.
+    /// Ensures that if ALL of a target application's windows are minimized to the Dock (`kAXMinimizedAttribute == true`)
+    /// or the application is hidden (`NSRunningApplication.isHidden`), a single window is unminimized when explicitly requested.
+    /// If the app already has at least one unminimized window on any display, its minimized windows are never touched.
     @discardableResult
     public func ensureWindowUnminimizedInBackground(pid: Int32) -> Bool {
         guard pid > 0 else { return false }
@@ -59,19 +59,24 @@ public final class VirtualDisplayManager: @unchecked Sendable {
         let appElem = AXUIElementCreateApplication(pid)
         var windowsRef: CFTypeRef?
         guard AXUIElementCopyAttributeValue(appElem, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement] else {
+              let windows = windowsRef as? [AXUIElement], !windows.isEmpty else {
             return changed
         }
-        for win in windows {
+        let hasUnminimizedWindow = windows.contains { win in
             var minRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(win, kAXMinimizedAttribute as CFString, &minRef) == .success,
-               let isMin = minRef as? Bool, isMin {
-                AXUIElementSetAttributeValue(win, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
-                changed = true
+               let isMin = minRef as? Bool {
+                return !isMin
             }
+            return true
         }
-        if changed {
-            Thread.sleep(forTimeInterval: 0.45)
+        if hasUnminimizedWindow {
+            return changed
+        }
+        if let firstWin = windows.first {
+            AXUIElementSetAttributeValue(firstWin, kAXMinimizedAttribute as CFString, kCFBooleanFalse)
+            changed = true
+            Thread.sleep(forTimeInterval: 0.35)
         }
         return changed
     }

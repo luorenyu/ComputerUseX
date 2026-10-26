@@ -124,12 +124,12 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             )
             win.isOpaque = false
             win.backgroundColor = .clear
-            win.hasShadow = true
+            win.hasShadow = false
             win.ignoresMouseEvents = false
             win.isMovableByWindowBackground = true
             win.level = .floating
             win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle]
-            win.contentView = NSHostingView(
+            let hosting = NSHostingView(
                 rootView: MiniPreviewRootView(
                     viewModel: self.viewModel,
                     onSummonWindow: { [weak self] in
@@ -140,6 +140,11 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                     }
                 )
             )
+            hosting.wantsLayer = true
+            hosting.layer?.backgroundColor = NSColor.clear.cgColor
+            hosting.layer?.cornerRadius = 14
+            hosting.layer?.masksToBounds = true
+            win.contentView = hosting
             self.panel = win
 
             let timer = Timer(timeInterval: 0.24, repeats: true) { [weak self] _ in
@@ -459,20 +464,11 @@ struct MiniPreviewRootView: View {
     let onClosePreview: () -> Void
     @State private var isHovering: Bool = false
 
-    private let haloInset: CGFloat = 10.0
-
     var body: some View {
-        let cardW = max(80.0, viewModel.panelWidth - Double(haloInset * 2))
-        let cardH = max(80.0, viewModel.panelHeight - Double(haloInset * 2))
+        let cardW = max(80.0, viewModel.panelWidth)
+        let cardH = max(80.0, viewModel.panelHeight)
 
         ZStack {
-            // Outer Diffused Google Gemini Aurora Halo behind the preview window
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(GeminiPalette.auroraGradient, lineWidth: 3.5)
-                .frame(width: cardW, height: cardH)
-                .blur(radius: 6.5)
-                .opacity(0.85)
-
             GeometryReader { geo in
                 let w = max(1.0, geo.size.width)
                 let h = max(1.0, geo.size.height)
@@ -650,10 +646,8 @@ struct MiniPreviewRootView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.6)
+                    .strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.8)
             )
-            .shadow(color: GeminiPalette.violet.opacity(0.35), radius: 10, x: 0, y: 2)
-            .shadow(color: Color.black.opacity(0.48), radius: 12, x: 0, y: 6)
         }
         .frame(width: viewModel.panelWidth, height: viewModel.panelHeight)
     }

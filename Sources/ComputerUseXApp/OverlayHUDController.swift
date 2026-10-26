@@ -41,6 +41,10 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
         let pipVM = MiniPreviewWindowController.shared.viewModel
         if pipVM.targetWindowID > 0 && pipVM.windowBounds.width > 10 && pipVM.windowBounds.height > 10 {
             updateActiveScreen(for: pipVM.windowBounds.center)
+        } else if let ctx = MouseController.shared.lastResolvedTargetContext, ctx.bounds.width > 10 {
+            updateActiveScreen(for: ctx.bounds.center)
+        } else if let snapBounds = ElementSnapshotStore.shared.currentSnapshot()?.screenBounds, snapBounds.width > 10 {
+            updateActiveScreen(for: snapBounds.center)
         } else {
             updateActiveScreen(for: PermissionManager.shared.currentMouseLocation())
         }

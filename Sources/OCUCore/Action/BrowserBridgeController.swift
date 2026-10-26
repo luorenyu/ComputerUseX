@@ -43,6 +43,194 @@ public final class BrowserBridgeController: @unchecked Sendable {
 
     private init() {}
 
+    /// Returns true if the target application name or PID corresponds to a supported Chromium or Safari browser.
+    public func isBrowserApp(_ appName: String? = nil, pid: Int32? = nil) -> Bool {
+        let resolvedName: String = {
+            if let name = appName, !name.isEmpty { return name }
+            if let p = pid, p > 0, let running = NSRunningApplication(processIdentifier: p) {
+                return running.localizedName ?? running.bundleIdentifier ?? ""
+            }
+            return ""
+        }().lowercased()
+        guard !resolvedName.isEmpty else { return false }
+        let keywords = ["chrome", "safari", "arc", "edge", "brave", "chromium"]
+        return keywords.contains { resolvedName.contains($0) }
+    }
+
+    /// Zero-focus DOM fallback click at a screen coordinate `(point.x, point.y)` or matching text label inside a browser window.
+    public func clickAtScreenPointOrLabel(
+        point: ScreenPoint,
+        windowBounds: ScreenRect,
+        label: String? = nil,
+        browser: String? = nil
+    ) -> String? {
+        guard windowBounds.width > 80, windowBounds.height > 80 else { return nil }
+        let relX = max(0.0, min(1.0, (point.x - windowBounds.x) / windowBounds.width))
+        let distFromBottom = max(0.0, windowBounds.maxY - point.y)
+        let safeLabel = (label ?? "")
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let js = """
+        (function() {
+            var vx = Math.round(window.innerWidth * \(String(format: "%.5f", relX)));
+            var vy = Math.round(window.innerHeight - \(String(format: "%.1f", distFromBottom)));
+            var el = (vx >= 0 && vy >= 0 && vx <= window.innerWidth && vy <= window.innerHeight) ? document.elementFromPoint(vx, vy) : null;
+            var lbl = '\(safeLabel)';
+            if (lbl.length > 0 && (!el || (el.innerText || el.value || '').indexOf(lbl) === -1)) {
+                var cands = Array.from(document.querySelectorAll('button,a,input,[role="button"],[role="tab"],[role="menuitem"],span,div'));
+                var best = null;
+                var bestDist = 999999;
+                for (var i = 0; i < cands.length; i++) {
+                    var n = cands[i];
+                    var txt = (n.innerText || n.value || n.getAttribute('aria-label') || '').trim();
+                    if (txt === lbl || (txt.length <= lbl.length + 12 && txt.indexOf(lbl) !== -1)) {
+                        var r = n.getBoundingClientRect();
+                        if (r.width > 4 && r.height > 4) {
+                            var d = Math.hypot((r.left + r.width/2) - vx, (r.top + r.height/2) - vy);
+                            if (d < bestDist) { bestDist = d; best = n; }
+                        }
+                    }
+                }
+                if (best && bestDist < 260) { el = best; }
+            }
+            if (!el) return '';
+            if (el.focus) el.focus();
+            var opts = {bubbles: true, cancelable: true, view: window, clientX: vx, clientY: vy};
+            el.dispatchEvent(new MouseEvent('mousedown', opts));
+            el.dispatchEvent(new MouseEvent('mouseup', opts));
+            el.click();
+            return (el.tagName || 'EL') + ':' + ((el.innerText || el.value || '').trim().slice(0, 32));
+        })()
+        """
+        if let outcome = try? evaluateJavaScript(js, browser: browser),
+           let details = outcome.details,
+           !details.isEmpty && details != "(undefined)" {
+            return details
+        }
+        return nil
+    }
+
+    /// Zero-focus DOM text injection at a screen coordinate `(point.x, point.y)` or into `document.activeElement` in a browser.
+    public func typeAtScreenPoint(
+        text: String,
+        point: ScreenPoint?,
+        windowBounds: ScreenRect?,
+        clearFirst: Bool,
+        submit: Bool,
+        browser: String? = nil
+    ) -> Bool {
+        let safeText = text
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "\\'")
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "\\n")
+        var relX = -1.0
+        var distFromBottom = -1.0
+        if let pt = point, let wb = windowBounds, wb.width > 80, wb.height > 80 {
+            relX = max(0.0, min(1.0, (pt.x - wb.x) / wb.width))
+            distFromBottom = max(0.0, wb.maxY - pt.y)
+        }
+        let js = """
+        (function() {
+            var el = null;
+            if (\(relX >= 0 ? "true" : "false")) {
+                var vx = Math.round(window.innerWidth * \(String(format: "%.5f", max(0, relX))));
+                var vy = Math.round(window.innerHeight - \(String(format: "%.1f", max(0, distFromBottom))));
+                var hit = document.elementFromPoint(vx, vy);
+                while (hit && hit !== document.body) {
+                    var tag = (hit.tagName || '').toLowerCase();
+                    if (tag === 'textarea' || tag === 'input' || hit.isContentEditable || hit.getAttribute('contenteditable') === 'true') {
+                        el = hit; break;
+                    }
+                    hit = hit.parentElement;
+                }
+            }
+            if (!el) {
+                var act = document.activeElement;
+                if (act && act !== document.body) el = act;
+            }
+            if (!el) {
+                el = document.querySelector('textarea:not([disabled]), input[type="text"]:not([disabled]), [contenteditable="true"]');
+            }
+            if (!el) return 'ERR_NO_INPUT';
+            el.focus();
+            var val = '\(safeText)';
+            var tag = (el.tagName || '').toLowerCase();
+            if (tag === 'textarea' || tag === 'input') {
+                var proto = tag === 'textarea' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+                var setter = Object.getOwnPropertyDescriptor(proto, 'value');
+                var nextVal = \(clearFirst ? "val" : "(el.value || '') + val");
+                if (setter && setter.set) { setter.set.call(el, nextVal); } else { el.value = nextVal; }
+                el.dispatchEvent(new Event('input', {bubbles: true}));
+                el.dispatchEvent(new Event('change', {bubbles: true}));
+            } else {
+                if (\(clearFirst ? "true" : "false")) { document.execCommand('selectAll', false, null); }
+                document.execCommand('insertText', false, val);
+            }
+            if (\(submit ? "true" : "false")) {
+                el.dispatchEvent(new KeyboardEvent('keydown', {key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true}));
+                if (el.form) el.form.requestSubmit ? el.form.requestSubmit() : el.form.submit();
+            }
+            return 'OK_TYPED';
+        })()
+        """
+        if let outcome = try? evaluateJavaScript(js, browser: browser),
+           let details = outcome.details,
+           details.contains("OK_TYPED") {
+            return true
+        }
+        return false
+    }
+
+    /// Zero-focus DOM scroll at a screen coordinate `(point.x, point.y)` inside a browser window (supports inner scrollable containers).
+    @discardableResult
+    public func scrollAtScreenPoint(
+        dx: Double,
+        dy: Double,
+        point: ScreenPoint,
+        windowBounds: ScreenRect,
+        browser: String? = nil
+    ) -> Bool {
+        guard windowBounds.width > 80, windowBounds.height > 80 else { return false }
+        let relX = max(0.0, min(1.0, (point.x - windowBounds.x) / windowBounds.width))
+        let distFromBottom = max(0.0, windowBounds.maxY - point.y)
+        // Note: In cux scroll, positive dy (+500) is often passed by LLMs to scroll down, or negative dy (-500).
+        // Let's check scrollTop before/after and handle inner scrollable divs!
+        let js = """
+        (function() {
+            var vx = Math.round(window.innerWidth * \(String(format: "%.5f", relX)));
+            var vy = Math.round(window.innerHeight - \(String(format: "%.1f", distFromBottom)));
+            var el = document.elementFromPoint(vx, vy);
+            var target = null;
+            while (el && el !== document.body && el !== document.documentElement) {
+                var st = window.getComputedStyle(el);
+                var oy = st ? st.overflowY : '';
+                if ((oy === 'auto' || oy === 'scroll' || oy === 'overlay') && el.scrollHeight > el.clientHeight + 4) {
+                    target = el; break;
+                }
+                el = el.parentElement;
+            }
+            var deltaY = \(Int(dy.rounded()));
+            var deltaX = \(Int(dx.rounded()));
+            if (target) {
+                target.scrollBy({left: deltaX, top: deltaY, behavior: 'instant'});
+                return 'SCROLLED_EL';
+            }
+            window.scrollBy({left: deltaX, top: deltaY, behavior: 'instant'});
+            return 'SCROLLED_WIN';
+        })()
+        """
+        if let outcome = try? evaluateJavaScript(js, browser: browser),
+           let details = outcome.details,
+           details.contains("SCROLLED_") {
+            return true
+        }
+        return false
+    }
+
     /// Resolves the target running browser application name (defaults to Google Chrome or Safari if running).
     public func resolveBrowserAppName(preferred: String? = nil) -> String {
         if let pref = preferred, !pref.isEmpty {

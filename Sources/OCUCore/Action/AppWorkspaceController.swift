@@ -48,9 +48,50 @@ public final class AppWorkspaceController: @unchecked Sendable {
             (app.bundleIdentifier?.lowercased() == lower) ||
             (app.localizedName?.lowercased().contains(lower) == true)
         }) {
+            let name = running.localizedName ?? identifierOrName
+            let pid = running.processIdentifier
+
+            // In default Virtual Cursor / background mode, pin and target the application in the background
+            // WITHOUT calling `running.activate()` or `kAXRaiseAction` (which would steal the user's window/input focus
+            // or pop minimized windows onto the desktop).
+            if MouseController.shared.useVirtualCursorByDefault {
+                let scan = AXScanner.shared.scanApplication(
+                    appNameFilter: name,
+                    maxDepth: 10,
+                    maxElements: 40
+                )
+                let wid = scan.windowID ?? UInt32(listRunningApps().first(where: { $0.pid == pid })?.windows.first?.windowId ?? 0)
+                let bounds = scan.windowFrame ?? listRunningApps().first(where: { $0.pid == pid })?.windows.first?.frame ?? PermissionManager.shared.mainScreenBounds()
+                if wid > 0 {
+                    MouseController.shared.saveTargetContext(
+                        pid: pid,
+                        windowID: wid,
+                        bounds: bounds,
+                        appName: name
+                    )
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .pipTargetWindow(
+                            pid: pid,
+                            windowID: wid,
+                            appName: name,
+                            windowTitle: scan.windowTitle,
+                            windowBounds: bounds
+                        )
+                    )
+                }
+                KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🪟 已锁定后台目标: \(name)", subtitle: nil))
+                return ActionOutcome(
+                    action: "focus_app(background)",
+                    targetDescription: name,
+                    point: bounds.center,
+                    details: "pid=\(pid), windowID=\(wid), mode=background-pinned",
+                    elapsedMs: Int(Date().timeIntervalSince(startTime) * 1000)
+                )
+            }
+
             running.unhide()
             running.activate()
-            let axApp = AXUIElementCreateApplication(running.processIdentifier)
+            let axApp = AXUIElementCreateApplication(pid)
             var winsRef: CFTypeRef?
             if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &winsRef) == .success,
                let wins = winsRef as? [AXUIElement], !wins.isEmpty {
@@ -70,12 +111,11 @@ public final class AppWorkspaceController: @unchecked Sendable {
                 }
             }
             Thread.sleep(forTimeInterval: 0.22)
-            let name = running.localizedName ?? identifierOrName
             KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🪟 已激活应用: \(name)", subtitle: nil))
             return ActionOutcome(
                 action: "focus_app",
                 targetDescription: name,
-                details: "pid=\(running.processIdentifier)",
+                details: "pid=\(pid)",
                 elapsedMs: Int(Date().timeIntervalSince(startTime) * 1000)
             )
         }
@@ -89,13 +129,14 @@ public final class AppWorkspaceController: @unchecked Sendable {
             )
         }
 
-        // Launch via `/usr/bin/open -a <name>`
+        // Launch via `/usr/bin/open` (use `-g` in background mode so launching never steals foreground focus)
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        let bgFlags = MouseController.shared.useVirtualCursorByDefault ? ["-g"] : []
         if identifierOrName.contains(".") && !identifierOrName.hasSuffix(".app") {
-            proc.arguments = ["-b", identifierOrName]
+            proc.arguments = bgFlags + ["-b", identifierOrName]
         } else {
-            proc.arguments = ["-a", identifierOrName]
+            proc.arguments = bgFlags + ["-a", identifierOrName]
         }
         try? proc.run()
         proc.waitUntilExit()

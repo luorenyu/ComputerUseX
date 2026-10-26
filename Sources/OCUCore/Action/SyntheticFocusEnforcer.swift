@@ -93,7 +93,10 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                let pinnedMatch = candidates.first(where: { $0.windowID == pinnedWid }) {
                 return pinnedMatch
             }
-            if let containing = candidates.first(where: { $0.bounds.contains(point) }) {
+            if let containing = candidates.first(where: {
+                let padded = ScreenRect(x: $0.bounds.x - 14, y: $0.bounds.y - 14, width: $0.bounds.width + 28, height: $0.bounds.height + 28)
+                return padded.contains(point)
+            }) {
                 return containing
             }
             if let largest = candidates.max(by: { ($0.bounds.width * $0.bounds.height) < ($1.bounds.width * $1.bounds.height) }) {
@@ -122,7 +125,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 height: Double(boundsDict["Height"] ?? 0)
             )
             guard rect.width >= 80, rect.height >= 80 else { continue }
-            if rect.contains(point) {
+            let padded = ScreenRect(x: rect.x - 14, y: rect.y - 14, width: rect.width + 28, height: rect.height + 28)
+            if padded.contains(point) {
                 return (ownerPid, winNum, rect, ownerName)
             }
         }
@@ -332,8 +336,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         event.postToPid(pid)
     }
 
-    /// Performs a complete click at `point` inside `(pid, windowID, windowBounds)` while preserving the user's
-    /// physical mouse cursor position so custom C++ / Qt / Electron apps (like WeChat) and native Cocoa apps both respond.
+    /// Performs a complete click at `point` inside `(pid, windowID, windowBounds)` using pure process-targeted
+    /// synthesized events (`postToPid`) without ever warping the user's physical mouse cursor or posting to `.cghidEventTap`.
     public func performBackgroundClick(
         at point: ScreenPoint,
         button: MouseButton,
@@ -342,8 +346,6 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         windowID: UInt32,
         windowBounds: ScreenRect
     ) {
-        let savedMousePos = PermissionManager.shared.currentMouseLocation().cgPoint
-
         let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
             switch button {
             case .left: return (.leftMouseDown, .leftMouseUp, .left)
@@ -352,54 +354,7 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             }
         }()
 
-        // 1. Only when the target app is ALREADY the frontmost active application and the point is unoccluded on screen,
-        // perform an atomic micro-warp + HID event tap click.
-        // When the target app is in the background, we NEVER post to `.cghidEventTap` so we never pull a background
-        // window to the foreground or steal OS focus from the user's active app!
-        let isFrontmostApp = (NSWorkspace.shared.frontmostApplication?.processIdentifier == pid)
-        if isFrontmostApp && isPointUnoccludedOnScreen(at: point, forPid: pid) {
-            let cgPt = point.cgPoint
-            CGWarpMouseCursorPosition(cgPt)
-            CGAssociateMouseAndMouseCursorPosition(1)
-            if let moveEvent = CGEvent(
-                mouseEventSource: nil,
-                mouseType: .mouseMoved,
-                mouseCursorPosition: cgPt,
-                mouseButton: .left
-            ) {
-                moveEvent.post(tap: .cghidEventTap)
-            }
-            Thread.sleep(forTimeInterval: 0.010)
-            for i in 1...max(1, clickCount) {
-                if let downEvent = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: downType,
-                    mouseCursorPosition: cgPt,
-                    mouseButton: cgButton
-                ), let upEvent = CGEvent(
-                    mouseEventSource: nil,
-                    mouseType: upType,
-                    mouseCursorPosition: cgPt,
-                    mouseButton: cgButton
-                ) {
-                    downEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
-                    upEvent.setIntegerValueField(.mouseEventClickState, value: Int64(i))
-                    downEvent.post(tap: .cghidEventTap)
-                    Thread.sleep(forTimeInterval: 0.025)
-                    upEvent.post(tap: .cghidEventTap)
-                }
-                if i < clickCount {
-                    Thread.sleep(forTimeInterval: 0.030)
-                }
-            }
-            // Wait 35ms before restoring cursor so asynchronous IPC apps (Chrome/Electron) receive mouseUp at cgPt
-            Thread.sleep(forTimeInterval: 0.035)
-            CGWarpMouseCursorPosition(savedMousePos)
-            CGAssociateMouseAndMouseCursorPosition(1)
-            return
-        }
-
-        // 2. Fallback for occluded background windows: post window-targeted events directly to PID
+        // Post window-targeted events directly to PID without touching .cghidEventTap or physical mouse cursor
         enforceBackgroundFocus(
             pid: pid,
             windowID: windowID,
@@ -448,7 +403,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         dy: Int32,
         pid: Int32,
         windowID: UInt32,
-        windowBounds: ScreenRect
+        windowBounds: ScreenRect,
+        phase: Int64 = 2
     ) {
         guard let scrollEvent = CGEvent(
             scrollWheelEvent2Source: nil,
@@ -461,6 +417,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
             return
         }
         scrollEvent.location = point.cgPoint
+        scrollEvent.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        scrollEvent.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase)
         if windowID != 0 {
             if let field91 = CGEventField(rawValue: 91) {
                 scrollEvent.setIntegerValueField(field91, value: Int64(windowID))

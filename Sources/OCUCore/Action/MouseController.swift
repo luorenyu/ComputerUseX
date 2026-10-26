@@ -2,6 +2,14 @@ import Foundation
 import CoreGraphics
 import AppKit
 
+private struct PersistedCursorState: Codable {
+    var cursorLocation: ScreenPoint?
+    var targetPid: Int32?
+    var targetWindowID: UInt32?
+    var targetWindowBounds: ScreenRect?
+    var targetAppName: String?
+}
+
 public final class MouseController: @unchecked Sendable {
     public static let shared = MouseController()
 
@@ -14,13 +22,85 @@ public final class MouseController: @unchecked Sendable {
     private var lastTargetPid: Int32? = nil
     private var lastTargetWindowID: UInt32? = nil
     private var lastTargetWindowBounds: ScreenRect? = nil
+    private var lastTargetAppName: String? = nil
 
-    private init() {}
+    private var cursorStateFileURL: URL {
+        ElementSnapshotStore.shared.cacheDirectory.appendingPathComponent("cursor_state.json")
+    }
+
+    private init() {
+        loadPersistedState()
+    }
+
+    private func loadPersistedState() {
+        guard FileManager.default.fileExists(atPath: cursorStateFileURL.path),
+              let data = try? Data(contentsOf: cursorStateFileURL),
+              let decoded = try? JSONDecoder().decode(PersistedCursorState.self, from: data) else {
+            return
+        }
+        virtualCursorLocation = decoded.cursorLocation
+        lastTargetPid = decoded.targetPid
+        lastTargetWindowID = decoded.targetWindowID
+        lastTargetWindowBounds = decoded.targetWindowBounds
+        lastTargetAppName = decoded.targetAppName
+        if let pid = decoded.targetPid, let wid = decoded.targetWindowID, pid > 0, wid > 0 {
+            SyntheticFocusEnforcer.shared.pinWindow(pid: pid, windowID: wid)
+        }
+    }
+
+    private func persistStateLocked() {
+        let state = PersistedCursorState(
+            cursorLocation: virtualCursorLocation,
+            targetPid: lastTargetPid,
+            targetWindowID: lastTargetWindowID,
+            targetWindowBounds: lastTargetWindowBounds,
+            targetAppName: lastTargetAppName
+        )
+        if let data = try? JSONEncoder().encode(state) {
+            try? data.write(to: cursorStateFileURL, options: .atomic)
+        }
+    }
+
+    public func saveTargetContext(
+        pid: Int32,
+        windowID: UInt32,
+        bounds: ScreenRect,
+        appName: String? = nil,
+        cursorPoint: ScreenPoint? = nil
+    ) {
+        stateLock.lock()
+        lastTargetPid = pid
+        lastTargetWindowID = windowID
+        lastTargetWindowBounds = bounds
+        if let name = appName, !name.isEmpty {
+            lastTargetAppName = name
+        }
+        if let pt = cursorPoint {
+            virtualCursorLocation = pt
+        } else if virtualCursorLocation == nil || !bounds.contains(virtualCursorLocation!) {
+            virtualCursorLocation = bounds.center
+        }
+        persistStateLocked()
+        stateLock.unlock()
+        SyntheticFocusEnforcer.shared.pinWindow(pid: pid, windowID: windowID)
+    }
 
     public var currentVirtualOrPhysicalLocation: ScreenPoint {
         stateLock.lock()
-        defer { stateLock.unlock() }
-        return virtualCursorLocation ?? PermissionManager.shared.currentMouseLocation()
+        let savedLoc = virtualCursorLocation
+        let savedBounds = lastTargetWindowBounds
+        stateLock.unlock()
+        if let loc = savedLoc {
+            return loc
+        }
+        if let bounds = savedBounds, bounds.width > 10, bounds.height > 10 {
+            return bounds.center
+        }
+        if let snapBounds = ElementSnapshotStore.shared.currentSnapshot()?.screenBounds,
+           snapBounds.width > 10, snapBounds.height > 10 {
+            return snapBounds.center
+        }
+        return PermissionManager.shared.currentMouseLocation()
     }
 
     public var lastResolvedTargetContext: (pid: Int32, windowID: UInt32, bounds: ScreenRect)? {
@@ -28,6 +108,11 @@ public final class MouseController: @unchecked Sendable {
         defer { stateLock.unlock() }
         if let pid = lastTargetPid, let wid = lastTargetWindowID, let b = lastTargetWindowBounds {
             return (pid, wid, b)
+        }
+        if let snap = ElementSnapshotStore.shared.currentSnapshot(),
+           snap.activePid > 0,
+           let wid = snap.windowID, wid > 0 {
+            return (snap.activePid, wid, snap.screenBounds)
         }
         return nil
     }
@@ -41,16 +126,32 @@ public final class MouseController: @unchecked Sendable {
             return (explicitPid, explicitApp)
         }
         if let snap = ElementSnapshotStore.shared.currentSnapshot(),
-           snap.activePid > 0,
-           snap.screenBounds.contains(point) {
-            return (snap.activePid, snap.activeApp)
+           snap.activePid > 0 {
+            let padded = ScreenRect(
+                x: snap.screenBounds.x - 24,
+                y: snap.screenBounds.y - 24,
+                width: snap.screenBounds.width + 48,
+                height: snap.screenBounds.height + 48
+            )
+            if padded.contains(point) {
+                return (snap.activePid, snap.activeApp)
+            }
         }
         stateLock.lock()
         let savedPid = lastTargetPid
         let savedBounds = lastTargetWindowBounds
+        let savedApp = lastTargetAppName
         stateLock.unlock()
-        if let pid = savedPid, let bounds = savedBounds, bounds.contains(point) {
-            return (pid, nil)
+        if let pid = savedPid, let bounds = savedBounds {
+            let padded = ScreenRect(
+                x: bounds.x - 24,
+                y: bounds.y - 24,
+                width: bounds.width + 48,
+                height: bounds.height + 48
+            )
+            if padded.contains(point) {
+                return (pid, savedApp)
+            }
         }
         return (nil, nil)
     }
@@ -66,7 +167,7 @@ public final class MouseController: @unchecked Sendable {
         let isVirtual = virtualCursor ?? useVirtualCursorByDefault
         if isVirtual {
             try KillSwitchMonitor.shared.verifySafeToProceed()
-            let start = currentVirtualOrPhysicalLocation
+            let rawStart = currentVirtualOrPhysicalLocation
             let pref = resolveEffectivePreferredTarget(at: destination, explicitPid: pid)
             let resolvedWin = SyntheticFocusEnforcer.shared.resolveTargetWindow(
                 at: destination,
@@ -75,6 +176,20 @@ public final class MouseController: @unchecked Sendable {
             )
             let effWinID = windowID ?? resolvedWin?.windowID
             let effPid = pref.pid ?? resolvedWin?.pid
+
+            // Never animate the virtual cursor across two different monitors (which would cause HUD/cursor screen jumping)
+            let destDisplayID = PermissionManager.shared.displayContaining(point: destination).id
+            let startDisplayID = PermissionManager.shared.displayContaining(point: rawStart).id
+            let start: ScreenPoint
+            if startDisplayID != destDisplayID {
+                if let rw = resolvedWin, PermissionManager.shared.displayContaining(point: rw.bounds.center).id == destDisplayID {
+                    start = rw.bounds.center
+                } else {
+                    start = ScreenPoint(x: destination.x - 28.0, y: destination.y - 20.0)
+                }
+            } else {
+                start = rawStart
+            }
             let distance = start.distance(to: destination)
 
             stateLock.lock()
@@ -82,7 +197,10 @@ public final class MouseController: @unchecked Sendable {
                 lastTargetPid = rw.pid
                 lastTargetWindowID = rw.windowID
                 lastTargetWindowBounds = rw.bounds
+                lastTargetAppName = rw.appName
             }
+            virtualCursorLocation = destination
+            persistStateLocked()
             stateLock.unlock()
 
             if let rw = resolvedWin {
@@ -101,15 +219,12 @@ public final class MouseController: @unchecked Sendable {
                 KillSwitchMonitor.shared.emitHUDEvent(
                     .virtualCursorMove(point: destination, windowID: effWinID, pid: effPid, tiltAngle: 0.0, label: label)
                 )
-                stateLock.lock()
-                virtualCursorLocation = destination
-                stateLock.unlock()
                 return
             }
 
-            let steps = max(8, min(24, Int(distance / 36.0) + 8))
+            let steps = max(8, min(20, Int(distance / 42.0) + 6))
             let points = CubicBezierTrajectory.sample(from: start, to: destination, steps: steps)
-            let stepInterval = max(0.006, duration / Double(points.count))
+            let stepInterval = max(0.005, duration / Double(points.count))
 
             KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
 
@@ -128,9 +243,6 @@ public final class MouseController: @unchecked Sendable {
             KillSwitchMonitor.shared.emitHUDEvent(
                 .virtualCursorMove(point: destination, windowID: effWinID, pid: effPid, tiltAngle: 0.0, label: nil)
             )
-            stateLock.lock()
-            virtualCursorLocation = destination
-            stateLock.unlock()
             return
         }
 
@@ -215,11 +327,13 @@ public final class MouseController: @unchecked Sendable {
             preferredAppName: pref.appName
         )
         if let wc = winContext {
-            stateLock.lock()
-            lastTargetPid = wc.pid
-            lastTargetWindowID = wc.windowID
-            lastTargetWindowBounds = wc.bounds
-            stateLock.unlock()
+            saveTargetContext(
+                pid: wc.pid,
+                windowID: wc.windowID,
+                bounds: wc.bounds,
+                appName: wc.appName,
+                cursorPoint: targetPoint
+            )
 
             KillSwitchMonitor.shared.emitHUDEvent(
                 .pipTargetWindow(
@@ -268,18 +382,32 @@ public final class MouseController: @unchecked Sendable {
             .clickRipple(point: targetPoint, button: button, clickCount: clickCount)
         )
 
+        let userFrontmostApp = NSWorkspace.shared.frontmostApplication
         let isBackgroundWindow: Bool = {
-            guard let wc = winContext else { return false }
+            guard let wc = winContext else { return true }
             return !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: wc.windowID, pid: wc.pid)
         }()
 
+        let restoreUserFocusIfNeeded: (Int32?) -> Void = { targetPid in
+            guard isVirtual,
+                  let userApp = userFrontmostApp,
+                  let tPid = targetPid,
+                  userApp.processIdentifier != tPid else {
+                return
+            }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == tPid {
+                userApp.activate()
+            }
+        }
+
         // Step 4: Execute the actual click after the cursor has landed and pressed
-        if (axNative || (isVirtual && isBackgroundWindow)) && !hasOffset,
+        if (axNative || isVirtual) && !hasOffset,
            let el = resolvedElement,
            el.source == .ax,
            button == .left,
            clickCount == 1 {
             if AXScanner.shared.performNativePress(ref: el.ref) {
+                restoreUserFocusIfNeeded(el.pid)
                 if isVirtual, let wc = winContext {
                     DispatchQueue.global().asyncAfter(deadline: .now() + 0.14) {
                         KillSwitchMonitor.shared.emitHUDEvent(
@@ -299,27 +427,58 @@ public final class MouseController: @unchecked Sendable {
             }
         }
 
-        if isVirtual, let wc = winContext {
-            SyntheticFocusEnforcer.shared.performBackgroundClick(
-                at: targetPoint,
-                button: button,
-                clickCount: clickCount,
-                pid: wc.pid,
-                windowID: wc.windowID,
-                windowBounds: wc.bounds
-            )
+        if isVirtual {
+            let effPid = winContext?.pid ?? resolvedElement?.pid ?? pref.pid ?? ElementSnapshotStore.shared.currentSnapshot()?.activePid ?? 0
+            let effWid = winContext?.windowID ?? resolvedElement?.windowID ?? lastTargetWindowID ?? ElementSnapshotStore.shared.currentSnapshot()?.windowID ?? 0
+            let effBounds = winContext?.bounds ?? lastTargetWindowBounds ?? ElementSnapshotStore.shared.currentSnapshot()?.screenBounds ?? ScreenRect(x: 0, y: 0, width: 1200, height: 800)
+            let effAppName = winContext?.appName ?? resolvedElement?.appName ?? pref.appName ?? ElementSnapshotStore.shared.currentSnapshot()?.activeApp
+
+            var detailParts: [String] = ["mode=virtual", "pid=\(effPid)", "windowID=\(effWid)"]
+
+            // For raw coordinates (e.g. click 2733 611) or OCR elements (@e102 [ocrText: 填写评价]) in virtual mode:
+            // 1. Try position-based Accessibility hit-test press (`AXUIElementCopyElementAtPosition` -> `kAXPressAction`),
+            //    which triggers Chromium/WebKit/Electron's native Blink `kDoDefault` click even in the background!
+            if button == .left && clickCount == 1 && effPid > 0 {
+                if let axHitDesc = AXScanner.shared.performNativePressAtPosition(pid: effPid, point: targetPoint) {
+                    detailParts.append("axHit=\(axHitDesc)")
+                } else if BrowserBridgeController.shared.isBrowserApp(effAppName, pid: effPid),
+                          let domHit = BrowserBridgeController.shared.clickAtScreenPointOrLabel(
+                              point: targetPoint,
+                              windowBounds: effBounds,
+                              label: resolvedElement?.label,
+                              browser: effAppName
+                          ) {
+                    detailParts.append("domHit=\(domHit)")
+                }
+            }
+
+            // 2. Also post process-targeted mouse events (`postToPid`) and focus the element at `targetPoint`
+            if effPid > 0 {
+                AXScanner.shared.focusElementAtPosition(pid: effPid, point: targetPoint)
+                SyntheticFocusEnforcer.shared.performBackgroundClick(
+                    at: targetPoint,
+                    button: button,
+                    clickCount: clickCount,
+                    pid: effPid,
+                    windowID: effWid,
+                    windowBounds: effBounds
+                )
+            }
+
+            restoreUserFocusIfNeeded(effPid)
+
             DispatchQueue.global().asyncAfter(deadline: .now() + 0.14) {
                 KillSwitchMonitor.shared.emitHUDEvent(
-                    .virtualCursorPress(point: targetPoint, windowID: wc.windowID, isPressed: false)
+                    .virtualCursorPress(point: targetPoint, windowID: effWid, isPressed: false)
                 )
             }
             let ms = Int(Date().timeIntervalSince(startTime) * 1000)
-            KillSwitchMonitor.shared.logAction("🖱️ [Virtual] Clicked \(targetDesc) -> PID \(wc.pid) Win #\(wc.windowID)")
+            KillSwitchMonitor.shared.logAction("🖱️ [Virtual] Clicked \(targetDesc) -> PID \(effPid) Win #\(effWid)")
             return ActionOutcome(
                 action: "click(virtual)",
                 targetDescription: targetDesc,
                 point: targetPoint,
-                details: "mode=virtual, pid=\(wc.pid), windowID=\(wc.windowID), button=\(button.rawValue), count=\(clickCount)",
+                details: detailParts.joined(separator: ", "),
                 elapsedMs: ms
             )
         }
@@ -497,7 +656,28 @@ public final class MouseController: @unchecked Sendable {
             targetPoint = ScreenPoint(x: px, y: py)
         }
 
-        let scrollPoint = targetPoint ?? currentVirtualOrPhysicalLocation
+        let fallbackCenter: ScreenPoint = {
+            stateLock.lock()
+            let savedLoc = virtualCursorLocation
+            let savedBounds = lastTargetWindowBounds
+            stateLock.unlock()
+            if let b = savedBounds, b.width > 40, b.height > 40 {
+                if let loc = savedLoc, b.contains(loc) {
+                    return loc
+                }
+                return b.center
+            }
+            if let snap = ElementSnapshotStore.shared.currentSnapshot(),
+               snap.screenBounds.width > 40, snap.screenBounds.height > 40 {
+                if let loc = savedLoc, snap.screenBounds.contains(loc) {
+                    return loc
+                }
+                return snap.screenBounds.center
+            }
+            return currentVirtualOrPhysicalLocation
+        }()
+
+        let scrollPoint = targetPoint ?? fallbackCenter
         let pref = resolveEffectivePreferredTarget(
             at: scrollPoint,
             explicitPid: preferredPid,
@@ -508,6 +688,10 @@ public final class MouseController: @unchecked Sendable {
             preferredPid: pref.pid,
             preferredAppName: pref.appName
         )
+
+        if let wc = winContext {
+            saveTargetContext(pid: wc.pid, windowID: wc.windowID, bounds: wc.bounds, appName: wc.appName, cursorPoint: scrollPoint)
+        }
 
         if let pt = targetPoint {
             try moveSmoothly(to: pt, duration: 0.14, windowID: winContext?.windowID, pid: winContext?.pid)
@@ -521,50 +705,56 @@ public final class MouseController: @unchecked Sendable {
         let steps = 8
         let stepDx = Int32((dx / Double(steps)).rounded())
         let stepDy = Int32((dy / Double(steps)).rounded())
-        let savedMousePos = PermissionManager.shared.currentMouseLocation().cgPoint
         let scrollLoc = scrollPoint.cgPoint
 
-        let isBackgroundWindow: Bool = {
-            guard let wc = winContext else { return false }
-            return !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: wc.windowID, pid: wc.pid)
-        }()
-
-        for _ in 0..<steps {
-            try KillSwitchMonitor.shared.verifySafeToProceed()
-            if useVirtualCursorByDefault, isBackgroundWindow, let wc = winContext {
+        if useVirtualCursorByDefault, let wc = winContext {
+            if BrowserBridgeController.shared.isBrowserApp(wc.appName, pid: wc.pid) {
+                BrowserBridgeController.shared.scrollAtScreenPoint(
+                    dx: dx,
+                    dy: dy,
+                    point: scrollPoint,
+                    windowBounds: wc.bounds,
+                    browser: wc.appName
+                )
+            }
+            for stepIdx in 0..<steps {
+                try KillSwitchMonitor.shared.verifySafeToProceed()
+                let phase: Int64 = (stepIdx == 0) ? 1 : ((stepIdx == steps - 1) ? 4 : 2)
                 SyntheticFocusEnforcer.shared.postSynthesizedScrollEvent(
                     at: scrollPoint,
                     dx: stepDx,
                     dy: stepDy,
                     pid: wc.pid,
                     windowID: wc.windowID,
-                    windowBounds: wc.bounds
+                    windowBounds: wc.bounds,
+                    phase: phase
                 )
-            } else if let scrollEvent = CGEvent(
-                scrollWheelEvent2Source: nil,
-                units: .pixel,
-                wheelCount: 2,
-                wheel1: stepDy,
-                wheel2: stepDx,
-                wheel3: 0
-            ) {
-                scrollEvent.location = scrollLoc
-                scrollEvent.post(tap: .cghidEventTap)
+                Thread.sleep(forTimeInterval: 0.012)
             }
-            Thread.sleep(forTimeInterval: 0.014)
-        }
-        if useVirtualCursorByDefault && !isBackgroundWindow {
-            CGWarpMouseCursorPosition(savedMousePos)
-            CGAssociateMouseAndMouseCursorPosition(1)
+        } else {
+            for _ in 0..<steps {
+                try KillSwitchMonitor.shared.verifySafeToProceed()
+                if let scrollEvent = CGEvent(
+                    scrollWheelEvent2Source: nil,
+                    units: .pixel,
+                    wheelCount: 2,
+                    wheel1: stepDy,
+                    wheel2: stepDx,
+                    wheel3: 0
+                ) {
+                    scrollEvent.location = scrollLoc
+                    scrollEvent.post(tap: .cghidEventTap)
+                }
+                Thread.sleep(forTimeInterval: 0.014)
+            }
         }
 
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
-        let loc = targetPoint ?? PermissionManager.shared.currentMouseLocation()
-        KillSwitchMonitor.shared.logAction("🛞 Scrolled dx=\(Int(dx)), dy=\(Int(dy))")
+        KillSwitchMonitor.shared.logAction("🛞 Scrolled dx=\(Int(dx)), dy=\(Int(dy)) at (\(Int(scrollPoint.x)),\(Int(scrollPoint.y)))")
         return ActionOutcome(
             action: "scroll",
             targetDescription: "dx=\(Int(dx)), dy=\(Int(dy))",
-            point: loc,
+            point: scrollPoint,
             elapsedMs: ms
         )
     }

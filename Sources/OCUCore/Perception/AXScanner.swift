@@ -11,6 +11,7 @@ public final class AXScanner: @unchecked Sendable {
 
     private let lock = NSLock()
     private var liveElementMap: [String: AXUIElement] = [:]
+    private var enhancedAXInitializedPids: Set<Int32> = []
     private let getWindowIDFn: AXUIElementGetWindowFn?
 
     private let interactiveRoles: Set<String> = [
@@ -55,9 +56,138 @@ public final class AXScanner: @unchecked Sendable {
         guard let element = resolveLiveAXElement(for: ref) else {
             return false
         }
-        _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        let role = copyStringAttribute(element, kAXRoleAttribute as String) ?? ""
+        let subrole = copyStringAttribute(element, kAXSubroleAttribute as String) ?? ""
+        // Avoid setting kAXFocusedAttribute on browser tab strip buttons (AXRadioButton / AXTabButton)
+        // because AppKit tab controls may activate the window when focused.
+        if role != "AXRadioButton" && subrole != "AXTabButton" {
+            _ = AXUIElementSetAttributeValue(element, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        }
         let err = AXUIElementPerformAction(element, kAXPressAction as CFString)
         return err == .success
+    }
+
+    /// Performs a native `kAXPressAction` at a screen coordinate `(x, y)` inside `pid` using `AXUIElementCopyElementAtPosition`.
+    /// This enables background clicks on `ocrText` elements or raw `(x, y)` coordinates inside Chromium/Electron/WebKit
+    /// web pages without requiring foreground window focus.
+    public func performNativePressAtPosition(pid: Int32, point: ScreenPoint) -> String? {
+        guard pid > 0 else { return nil }
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.6)
+        AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+
+        var hitRef: AXUIElement?
+        let hitErr = AXUIElementCopyElementAtPosition(axApp, Float(point.x), Float(point.y), &hitRef)
+        guard hitErr == .success, let startEl = hitRef else {
+            return nil
+        }
+
+        var current: AXUIElement? = startEl
+        for _ in 0..<6 {
+            guard let el = current else { break }
+            let role = copyStringAttribute(el, kAXRoleAttribute as String) ?? ""
+            let subrole = copyStringAttribute(el, kAXSubroleAttribute as String) ?? ""
+            // Never press the root window, application, or scroll area container itself
+            if role == "AXWindow" || role == "AXApplication" || role == "AXScrollArea" || role == "AXWebArea" {
+                break
+            }
+            let actions = copyActionNames(el)
+            if actions.contains(kAXPressAction as String) || interactiveRoles.contains(role) {
+                if role != "AXRadioButton" && subrole != "AXTabButton" {
+                    _ = AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                }
+                if AXUIElementPerformAction(el, kAXPressAction as CFString) == .success {
+                    let lbl = extractLabel(from: el, depth: 0)
+                    return "\(role)\(lbl.isEmpty ? "" : ":\(lbl)")"
+                }
+            }
+            current = copyAttribute(el, kAXParentAttribute as String)
+        }
+
+        // Last resort: try pressing the immediate hit element directly
+        let startRole = copyStringAttribute(startEl, kAXRoleAttribute as String) ?? ""
+        if startRole != "AXWindow" && startRole != "AXApplication" && startRole != "AXWebArea" && startRole != "AXScrollArea" {
+            _ = AXUIElementSetAttributeValue(startEl, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+            if AXUIElementPerformAction(startEl, kAXPressAction as CFString) == .success {
+                return startRole
+            }
+        }
+        return nil
+    }
+
+    /// Focuses the accessibility element at `point` inside `pid` (via `AXUIElementCopyElementAtPosition` + `kAXFocusedAttribute`)
+    /// so that inside multi-process browsers (Chrome/Arc/Edge), DOM focus moves to the clicked `<textarea>` / `<input>`
+    /// instead of remaining in the browser's address bar.
+    @discardableResult
+    public func focusElementAtPosition(pid: Int32, point: ScreenPoint) -> Bool {
+        guard pid > 0 else { return false }
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.5)
+        var hitRef: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(axApp, Float(point.x), Float(point.y), &hitRef) == .success,
+              let startEl = hitRef else {
+            return false
+        }
+        var current: AXUIElement? = startEl
+        for _ in 0..<5 {
+            guard let el = current else { break }
+            let role = copyStringAttribute(el, kAXRoleAttribute as String) ?? ""
+            if role == "AXTextArea" || role == "AXTextField" || role == "AXSearchField" || role == "AXComboBox" {
+                _ = AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                _ = AXUIElementPerformAction(el, kAXPressAction as CFString)
+                return true
+            }
+            current = copyAttribute(el, kAXParentAttribute as String)
+        }
+        _ = AXUIElementSetAttributeValue(startEl, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        return true
+    }
+
+    /// Sets `kAXValueAttribute` on an editable element at `point` inside `pid` without stealing OS focus.
+    public func performNativeSetValueAtPosition(
+        pid: Int32,
+        point: ScreenPoint,
+        value: String,
+        submit: Bool = false
+    ) -> Bool {
+        guard pid > 0 else { return false }
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.6)
+        var hitRef: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(axApp, Float(point.x), Float(point.y), &hitRef) == .success,
+              let startEl = hitRef else {
+            return false
+        }
+        var current: AXUIElement? = startEl
+        for _ in 0..<5 {
+            guard let el = current else { break }
+            let role = copyStringAttribute(el, kAXRoleAttribute as String) ?? ""
+            if role == "AXWindow" || role == "AXApplication" { break }
+            let isTextRole = (role == "AXTextArea" || role == "AXTextField" || role == "AXSearchField" || role == "AXComboBox")
+            var settable: DarwinBoolean = false
+            let canSet = AXUIElementIsAttributeSettable(el, kAXValueAttribute as CFString, &settable) == .success && settable.boolValue
+            if isTextRole || canSet {
+                let beforeVal = copyValueAsString(el)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                _ = AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                _ = AXUIElementPerformAction(el, kAXPressAction as CFString)
+                if AXUIElementSetAttributeValue(el, kAXValueAttribute as CFString, value as CFTypeRef) == .success {
+                    let expected = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    for _ in 0..<3 {
+                        Thread.sleep(forTimeInterval: 0.03)
+                        if let afterVal = copyValueAsString(el)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                           (afterVal == expected || (afterVal != beforeVal && !afterVal.isEmpty)) {
+                            if submit {
+                                _ = AXUIElementPerformAction(el, kAXConfirmAction as CFString)
+                            }
+                            return true
+                        }
+                    }
+                }
+            }
+            current = copyAttribute(el, kAXParentAttribute as String)
+        }
+        return false
     }
 
     /// Sets `kAXValueAttribute` directly on an AX text field / search field in the background without stealing OS focus,
@@ -147,8 +277,8 @@ public final class AXScanner: @unchecked Sendable {
         appNameFilter: String? = nil,
         preferredWindowID: UInt32? = nil,
         windowTitleFilter: String? = nil,
-        maxDepth: Int = 16,
-        maxElements: Int = 220
+        maxDepth: Int = 36,
+        maxElements: Int = 320
     ) -> (
         appName: String,
         pid: Int32,
@@ -192,6 +322,12 @@ public final class AXScanner: @unchecked Sendable {
         // Enable accessibility tree generation for Electron / Chromium / Qt / WeChat apps
         AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
         AXUIElementSetAttributeValue(axApp, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        lock.lock()
+        let isFirstAXAttach = enhancedAXInitializedPids.insert(pid).inserted
+        lock.unlock()
+        if isFirstAXAttach {
+            Thread.sleep(forTimeInterval: 0.14)
+        }
 
         let desktopBounds = PermissionManager.shared.desktopBounds()
         var resolvedWindowID: UInt32? = nil
@@ -325,7 +461,7 @@ public final class AXScanner: @unchecked Sendable {
                     rect.height <= desktopBounds.height * 0.98
 
                 if isOnScreen {
-                    let displayLabel = [title, desc, placeholder, valueStr, help]
+                    var displayLabel = [title, desc, placeholder, valueStr, help]
                         .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                         .first(where: { !$0.isEmpty }) ?? ""
 
@@ -334,6 +470,10 @@ public final class AXScanner: @unchecked Sendable {
                         subrole == "AXMinimizeButton" ||
                         subrole == "AXZoomButton" ||
                         subrole == "AXSearchField"
+
+                    if displayLabel.isEmpty && isInteractive {
+                        displayLabel = extractLabel(from: element, depth: 0)
+                    }
 
                     let isMeaningfulText = (role == "AXStaticText" && !displayLabel.isEmpty && displayLabel.count <= 120)
 
@@ -373,9 +513,9 @@ public final class AXScanner: @unchecked Sendable {
                 }
             }
 
-            if containerRolesToTraverse.contains(role) || depth < 6 {
+            if containerRolesToTraverse.contains(role) || role == "AXGenericElement" || depth < 8 {
                 if let children: [AXUIElement] = copyAttribute(element, kAXChildrenAttribute as String) {
-                    for child in children.prefix(100) {
+                    for child in children.prefix(180) {
                         traverse(child, depth: depth + 1)
                     }
                 }
@@ -426,6 +566,35 @@ public final class AXScanner: @unchecked Sendable {
             return String(role.dropFirst(2)).lowercased()
         }
         return role.lowercased()
+    }
+
+    private func copyActionNames(_ element: AXUIElement) -> [String] {
+        var namesRef: CFArray?
+        guard AXUIElementCopyActionNames(element, &namesRef) == .success,
+              let names = namesRef as? [String] else {
+            return []
+        }
+        return names
+    }
+
+    private func extractLabel(from element: AXUIElement, depth: Int) -> String {
+        let title = copyStringAttribute(element, kAXTitleAttribute as String)
+        let desc = copyStringAttribute(element, kAXDescriptionAttribute as String)
+        let val = copyValueAsString(element)
+        if let direct = [title, desc, val].compactMap({ $0?.trimmingCharacters(in: .whitespacesAndNewlines) }).first(where: { !$0.isEmpty }) {
+            return direct
+        }
+        guard depth < 2,
+              let children: [AXUIElement] = copyAttribute(element, kAXChildrenAttribute as String) else {
+            return ""
+        }
+        for child in children.prefix(6) {
+            let childText = extractLabel(from: child, depth: depth + 1)
+            if !childText.isEmpty {
+                return childText
+            }
+        }
+        return ""
     }
 
     private func copyAttribute<T>(_ element: AXUIElement, _ attribute: String) -> T? {

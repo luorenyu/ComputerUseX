@@ -119,11 +119,24 @@ public final class KeyboardController: @unchecked Sendable {
             try KillSwitchMonitor.shared.verifySafeToProceed()
         }
 
+        let userFrontmostApp = NSWorkspace.shared.frontmostApplication
         let offsetX = dx ?? 0
         let offsetY = dy ?? 0
         let hasOffset = (abs(offsetX) > 0.1 || abs(offsetY) > 0.1)
 
-        // When targeting an AX text field in a background window with no relative offset, try setting
+        let restoreUserFocusIfNeeded: (Int32?) -> Void = { pid in
+            guard isVirtual,
+                  let userApp = userFrontmostApp,
+                  let tPid = pid,
+                  userApp.processIdentifier != tPid else {
+                return
+            }
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == tPid {
+                userApp.activate()
+            }
+        }
+
+        // Fast Path A: When targeting an AX text field in virtual mode with no relative offset, try setting
         // kAXValueAttribute directly so background browsers/Cocoa apps receive text without stealing OS focus
         // or touching the user's system clipboard.
         if isVirtual && !hasOffset,
@@ -135,11 +148,7 @@ public final class KeyboardController: @unchecked Sendable {
                 preferredPid: el.pid,
                 preferredAppName: el.appName
             )
-            let isBackground = winCtx.map {
-                !SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: $0.windowID, pid: $0.pid)
-            } ?? false
-
-            if isBackground, AXScanner.shared.resolveLiveAXElement(for: el.ref) != nil {
+            if AXScanner.shared.resolveLiveAXElement(for: el.ref) != nil {
                 try MouseController.shared.moveSmoothly(
                     to: el.centerPoint,
                     duration: 0.16,
@@ -148,8 +157,9 @@ public final class KeyboardController: @unchecked Sendable {
                     pid: el.pid,
                     label: nil
                 )
-                Thread.sleep(forTimeInterval: 0.06)
+                Thread.sleep(forTimeInterval: 0.05)
                 if AXScanner.shared.performNativeSetValue(ref: el.ref, value: text, submit: submit) {
+                    restoreUserFocusIfNeeded(el.pid)
                     KillSwitchMonitor.shared.emitHUDEvent(
                         .highlightElement(rect: el.frame, label: el.label)
                     )
@@ -200,11 +210,63 @@ public final class KeyboardController: @unchecked Sendable {
             )
             clickedPoint = clickRes.point
             targetDesc = clickRes.targetDescription
-            Thread.sleep(forTimeInterval: 0.08)
+            Thread.sleep(forTimeInterval: 0.06)
         }
 
         let targetPid = resolveTargetPid(forVirtualMode: isVirtual)
-        if isVirtual, let ctx = MouseController.shared.lastResolvedTargetContext {
+        let targetCtx = MouseController.shared.lastResolvedTargetContext
+
+        // Fast Path B: Position-based AXValue injection or Browser DOM injection for raw coordinates (e.g. type 2900 882)
+        // or OCR elements in background browsers/apps, preventing keystrokes from leaking into the browser address bar!
+        if isVirtual, let pid = targetPid, pid > 0 {
+            let effectivePt = clickedPoint ?? targetCtx?.bounds.center
+            if let pt = effectivePt {
+                if AXScanner.shared.performNativeSetValueAtPosition(pid: pid, point: pt, value: text, submit: submit) {
+                    restoreUserFocusIfNeeded(pid)
+                    let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .statusPill(title: "⌨️ [后台输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
+                    )
+                    let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+                    KillSwitchMonitor.shared.logAction("⌨️ [AXValue@Pos] Typed \"\(preview)\" at (\(Int(pt.x)),\(Int(pt.y)))")
+                    return ActionOutcome(
+                        action: "type(ax-pos)",
+                        targetDescription: targetDesc,
+                        point: pt,
+                        details: "length=\(text.count), submit=\(submit), mode=ax-pos-background",
+                        elapsedMs: ms
+                    )
+                }
+                if BrowserBridgeController.shared.isBrowserApp(nil, pid: pid),
+                   BrowserBridgeController.shared.typeAtScreenPoint(
+                       text: text,
+                       point: pt,
+                       windowBounds: targetCtx?.bounds,
+                       clearFirst: clearFirst,
+                       submit: submit,
+                       browser: NSRunningApplication(processIdentifier: pid)?.localizedName
+                   ) {
+                    restoreUserFocusIfNeeded(pid)
+                    let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
+                    KillSwitchMonitor.shared.emitHUDEvent(
+                        .statusPill(title: "⌨️ [DOM输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
+                    )
+                    let ms = Int(Date().timeIntervalSince(startTime) * 1000)
+                    KillSwitchMonitor.shared.logAction("⌨️ [BrowserDOM] Typed \"\(preview)\" at (\(Int(pt.x)),\(Int(pt.y)))")
+                    return ActionOutcome(
+                        action: "type(browser-dom)",
+                        targetDescription: targetDesc,
+                        point: pt,
+                        details: "length=\(text.count), submit=\(submit), mode=browser-dom-background",
+                        elapsedMs: ms
+                    )
+                }
+                // Ensure Accessibility focus is placed on the hit-tested element at `pt` before Unicode key events
+                AXScanner.shared.focusElementAtPosition(pid: pid, point: pt)
+            }
+        }
+
+        if isVirtual, let ctx = targetCtx {
             SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
                 pid: ctx.pid,
                 windowID: ctx.windowID,
@@ -246,6 +308,7 @@ public final class KeyboardController: @unchecked Sendable {
             }
         }
 
+        restoreUserFocusIfNeeded(targetPid)
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
         KillSwitchMonitor.shared.logAction("⌨️ Typed \"\(preview)\"")
         return ActionOutcome(
@@ -259,11 +322,10 @@ public final class KeyboardController: @unchecked Sendable {
 
     private func resolveTargetPid(forVirtualMode isVirtual: Bool) -> Int32? {
         guard isVirtual else { return nil }
-        let frontPid = NSWorkspace.shared.frontmostApplication?.processIdentifier
-        if let ctxPid = MouseController.shared.lastResolvedTargetContext?.pid, ctxPid != frontPid {
+        if let ctxPid = MouseController.shared.lastResolvedTargetContext?.pid, ctxPid > 0 {
             return ctxPid
         }
-        if let snapPid = ElementSnapshotStore.shared.currentSnapshot()?.activePid, snapPid != frontPid {
+        if let snapPid = ElementSnapshotStore.shared.currentSnapshot()?.activePid, snapPid > 0 {
             return snapPid
         }
         return nil

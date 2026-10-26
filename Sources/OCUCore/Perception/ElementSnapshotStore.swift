@@ -51,18 +51,21 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             .statusPill(title: "🔍 正在扫描界面元素 (Snapshot)...", subtitle: appName ?? "当前窗口")
         )
 
-        // 1. Scan Accessibility Tree (and auto-unminimize in background if target app's window was minimized to Dock)
+        // 1. Scan Accessibility Tree without forcibly popping minimized Dock windows onto the user's desktop.
+        // Only unminimize if the caller explicitly requested foreground focus (`focusFirst == true`) in physical mode.
         var axScan = AXScanner.shared.scanApplication(
             appNameFilter: appName,
             preferredWindowID: preferredWindowID,
             windowTitleFilter: windowTitleFilter
         )
-        if axScan.pid > 0 && VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid) {
-            axScan = AXScanner.shared.scanApplication(
-                appNameFilter: appName,
-                preferredWindowID: preferredWindowID,
-                windowTitleFilter: windowTitleFilter
-            )
+        if focusFirst && !MouseController.shared.useVirtualCursorByDefault && axScan.pid > 0 {
+            if VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid) {
+                axScan = AXScanner.shared.scanApplication(
+                    appNameFilter: appName,
+                    preferredWindowID: preferredWindowID,
+                    windowTitleFilter: windowTitleFilter
+                )
+            }
         }
         try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: axScan.appName)
         var axElements = axScan.elements
@@ -94,6 +97,12 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         var scaleFactor = PermissionManager.shared.mainScreenScaleFactor()
 
         if let wid = axScan.windowID, wid > 0, axScan.pid > 0 {
+            MouseController.shared.saveTargetContext(
+                pid: axScan.pid,
+                windowID: wid,
+                bounds: displayBounds,
+                appName: axScan.appName
+            )
             KillSwitchMonitor.shared.emitHUDEvent(
                 .pipTargetWindow(
                     pid: axScan.pid,
@@ -362,8 +371,8 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         let axScan = AXScanner.shared.scanApplication(
             appNameFilter: targetAppName,
             preferredWindowID: prevSnap?.windowID,
-            maxDepth: 12,
-            maxElements: 120
+            maxDepth: 28,
+            maxElements: 200
         )
         guard axScan.pid > 0 else { return nil }
 
