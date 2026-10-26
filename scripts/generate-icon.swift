@@ -105,23 +105,28 @@ func renderIconImage(pixelSize: Int) -> NSImage {
         ctx.restoreGState()
     }
 
-    // Medium companion sparkle star (upper-right)
+    // Orbiting Sparkle #1 (Upper-Right)
     drawSparkleStar(
-        center: CGPoint(x: rect.minX + rect.width * 0.74, y: rect.minY + rect.height * 0.72),
+        center: CGPoint(x: rect.minX + rect.width * 0.78, y: rect.minY + rect.height * 0.76),
         radius: rect.width * 0.14
     )
-    // Small companion sparkle star (top-middle accent)
+    // Orbiting Sparkle #2 (Bottom-Right)
     drawSparkleStar(
-        center: CGPoint(x: rect.minX + rect.width * 0.50, y: rect.minY + rect.height * 0.82),
-        radius: rect.width * 0.072,
+        center: CGPoint(x: rect.minX + rect.width * 0.72, y: rect.minY + rect.height * 0.22),
+        radius: rect.width * 0.105
+    )
+    // Orbiting Sparkle #3 (Left — flanking the left blade)
+    drawSparkleStar(
+        center: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.56),
+        radius: rect.width * 0.095,
         fillWhite: true
     )
 
-    // 5. Primary Element: Aerodynamic Tailless Gemini Cyber-Blade Cursor (Replacing the largest star)
-    let tip = CGPoint(x: rect.minX + rect.width * 0.20, y: rect.minY + rect.height * 0.80)
-    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.27, y: rect.minY + rect.height * 0.16)
-    let notch = CGPoint(x: rect.minX + rect.width * 0.47, y: rect.minY + rect.height * 0.38)
-    let wingRight = CGPoint(x: rect.minX + rect.width * 0.80, y: rect.minY + rect.height * 0.46)
+    // 5. Central Slender Tailless Gemini Cyber-Blade Cursor (2:3 aspect ratio, surrounded by the 3 sparkles)
+    let tip = CGPoint(x: rect.minX + rect.width * 0.28, y: rect.minY + rect.height * 0.78)
+    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.315, y: rect.minY + rect.height * 0.22)
+    let notch = CGPoint(x: rect.minX + rect.width * 0.445, y: rect.minY + rect.height * 0.425)
+    let wingRight = CGPoint(x: rect.minX + rect.width * 0.64, y: rect.minY + rect.height * 0.485)
 
     let pointerPath = CGMutablePath()
     pointerPath.move(to: tip)
