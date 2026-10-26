@@ -140,75 +140,43 @@ When running as an MCP server (`cux mcp`), the following tools are exposed over 
 
 ---
 
-## 🏗️ Layered Architecture Design
+## 🏗️ Architecture Design
 
-`ComputerUseX` is structured into **five decoupled layers** across two executables (`cux` CLI/MCP binary and `ComputerUseX.app` companion daemon) sharing a single core library (`OCUCore`):
+`ComputerUseX` consists of the `cux` CLI/MCP binary, the `ComputerUseX.app` companion daemon, and the shared `OCUCore` library, organized into **four layers**:
 
-```
-+-----------------------------------------------------------------------------------+
-| Layer 1: Agent Protocol & Interface Layer                                         |
-|   - MCP Server (stdio JSON-RPC 2.0)        [Sources/OCUCore/MCP/MCPServer.swift]  |
-|   - CLI Subcommand Router (`cux`)          [Sources/cux/main.swift]               |
-|   - Client Plugins & Skills                [plugins/codex/, skills/]              |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-| Layer 2: Session Governance & Security Layer                                      |
-|   - App Access Control & Consent Guard     [Sources/OCUCore/Safety/]              |
-|   - Secure Input / Password Field Shield   (Blocks keystrokes on SecureEventInput)|
-|   - Append-Only Audit Log & Billing Store  (~/.computerusex/*.jsonl)              |
-+--------------------+-----------------------------------------+--------------------+
-                     |                                         |
-                     v                                         v
-+----------------------------------------+ +----------------------------------------+
-| Layer 3: Hybrid Perception Layer       | | Layer 4: Hybrid Action Execution Layer |
-| - AX Tree Traversal (`AXUIElement`)    | | - Tier 1: Native AX (`AXPress`/`Value`)|
-|   [Sources/OCUCore/AX/AXEngine.swift]  | | - Tier 2: Background `CGEvent` to PID  |
-| - Apple Vision OCR & IoU Deduplication | | - Tier 3: Hardware `CGEvent` Fallback  |
-|   [Sources/OCUCore/OCR/]               | |   [Sources/OCUCore/Action/]            |
-| - Window Capture, dHash & SoM Renderer | | - Browser DOM/JS Bridge (JXA/OSA)      |
-|   [Sources/OCUCore/Capture/]           | |   [Sources/OCUCore/Browser/]           |
-| - Incremental Snapshot Diff Engine     | | - Off-Screen Window Sandbox Manager    |
-|   [Sources/OCUCore/Perception/]        | |   [Sources/OCUCore/Sandbox/]           |
-+--------------------+-------------------+ +-------------------+--------------------+
-                     |                                         |
-                     +--------------------+--------------------+
-                                          | Unix Domain Socket (/tmp/cux-<uid>.sock)
-                                          v
-+-----------------------------------------------------------------------------------+
-| Layer 5: Companion Daemon & Visual Feedback Layer (`ComputerUseX.app`)            |
-|   - Unix Socket IPC Server/Client          [Sources/OCUCore/IPC/UnixSocketIPC]    |
-|   - MenuBar Controller & Control Center    [Sources/ComputerUseXApp/MainDashboard]|
-|   - Live PiP Background Window Streamer    [Sources/ComputerUseXApp/MiniWindow]   |
-|   - Non-Activating Click-Through Overlay   [Sources/ComputerUseXApp/AgentCursor]  |
-+-----------------------------------------------------------------------------------+
+```mermaid
+flowchart TB
+    subgraph L1["1. Agent Protocol & Interface Layer"]
+        direction LR
+        L1_A["MCP Server (stdio JSON-RPC 2.0)"] ~~~ L1_B["cux CLI Subcommands"] ~~~ L1_C["Codex Plugin & Agent Skills"]
+    end
+
+    subgraph L2["2. Session Governance & Security Layer"]
+        direction LR
+        L2_A["App Allowlist & Consent Guard"] ~~~ L2_B["Secure Input / Password Shield"] ~~~ L2_C["@eX Ref Map / Audit Log / Billing"]
+    end
+
+    subgraph L3["3. Core Perception & Action Engine Layer"]
+        direction LR
+        L3_A["Hybrid Perception Pipeline<br/>AXUIElement Tree · Vision OCR · SoM · Diff"] ~~~ L3_B["Hybrid Action Execution Pipeline<br/>AXPress / Background postToPid / Browser Bridge / Sandbox"]
+    end
+
+    subgraph L4["4. Companion Daemon & OS Layer"]
+        direction LR
+        L4_A["Unix Socket IPC"] ~~~ L4_B["ComputerUseX.app Control Center"] ~~~ L4_C["Live PiP Preview & Overlay HUD"]
+    end
+
+    L1 --> L2 --> L3 --> L4
 ```
 
-### Layer Responsibilities
+### Layer Responsibilities & Module Mapping
 
-1. **Layer 1 — Agent Protocol & Interface Layer (`MCP` + `CLI` + `Plugins`)**
-   - Translates incoming requests from MCP clients (`cux mcp`) or shell subcommands (`cux snapshot`, `cux click`, etc.) into strongly typed internal operations.
-   - Maintains an in-memory element reference map (`@e1` -> `UIElementNode`) across consecutive tool calls and persists snapshot state (`~/.computerusex/last_snapshot.json`) so stateless CLI invocations share the same element references.
-2. **Layer 2 — Session Governance & Security Layer (`Safety`)**
-   - Intercepts every perception and action request before execution.
-   - Verifies application authorization against user rules (`allowAnyApp` or per-bundle allowlist); if an unauthorized app is targeted, triggers a native authorization dialog via the companion daemon.
-   - Detects macOS `IsSecureEventInputEnabled()` and `AXSecureTextField` roles to prevent accidental credential leakage or password interception.
-   - Writes structured audit events and session usage records to `~/.computerusex/`.
-3. **Layer 3 — Hybrid Perception Layer (`AX` + `OCR` + `Capture` + `Perception`)**
-   - **AX Engine**: Traverses the target application's `AXUIElement` hierarchy with depth/node guards, normalizing roles, titles, values, enabled/focused states, and screen frames.
-   - **Vision OCR Engine**: Runs `VNRecognizeTextRequest` on window-specific `CGWindowListCreateImage` buffers when AX coverage is sparse, filtering out text boxes that overlap existing AX elements (`IoU > 0.45`).
-   - **Capture & SoM Renderer**: Computes 64-bit perceptual `dHash` fingerprints to detect visual changes and draws `@eX` bounding box annotations onto screenshots when visual grounding is requested.
-   - **Snapshot Diff Engine**: Compares consecutive snapshots to return only added, removed, or value-mutated elements (`--diff`).
-4. **Layer 4 — Hybrid Action Execution Layer (`Action` + `Browser` + `Sandbox`)**
-   - Implements a **3-tier execution fallback strategy**:
-     - **Tier 1 (Zero-Focus Native AX)**: Invokes `AXPress`, `AXRaise`, or sets `kAXValueAttribute` directly on the target `AXUIElement`.
-     - **Tier 2 (Background PID Synthesis)**: Synthesizes window-local focus and dispatches `CGEvent` packets directly to the target process (`CGEvent.postToPid`), operating background apps without moving the physical cursor.
-     - **Tier 3 (Foreground Hardware Event)**: Falls back to screen-level `CGEvent` injection when an application ignores background events.
-   - Provides transactional clipboard text entry (saving and restoring existing `NSPasteboard` contents) for reliable CJK/emoji input.
-5. **Layer 5 — Companion Daemon & Visual Feedback Layer (`IPC` + `ComputerUseXApp`)**
-   - Because CLI/MCP calls can be short-lived processes, UI rendering and persistent state live in `ComputerUseX.app`.
-   - `cux` communicates with `ComputerUseX.app` over a low-latency Unix Domain Socket (`/tmp/cux-<uid>.sock`) to drive the virtual cursor overlay, keep the Live PiP background window preview alive across multi-step tasks, and display interactive permission prompts.
+| Layer | Core Modules | Source Path | Responsibilities |
+| :--- | :--- | :--- | :--- |
+| **1. Agent Protocol & Interface Layer** | `MCPServer`<br/>`cux` CLI<br/>`Plugins & Skills` | `Sources/OCUCore/MCP/`<br/>`Sources/cux/`<br/>`plugins/codex/` | Parses MCP (`stdio` JSON-RPC 2.0) and CLI requests; provides the native OpenAI Codex plugin and reusable Agent Skill definitions. |
+| **2. Session Governance & Security Layer** | `AuditAndSecurityGuard`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | Enforces app allowlists and triggers interactive approval prompts; detects `SecureEventInput` and password fields to block sensitive keystrokes; persists `@e1..@eN` mappings and `~/.computerusex/` audit/billing logs. |
+| **3. Core Perception & Action Engine Layer** | **Perception**: `AXEngine` / `VisionOCR` / `Capture` / `Diff`<br/>**Execution**: `ActionExecutor` / `BrowserBridge` / `Sandbox` | `Sources/OCUCore/AX/`<br/>`Sources/OCUCore/OCR/`<br/>`Sources/OCUCore/Capture/`<br/>`Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Browser/`<br/>`Sources/OCUCore/Sandbox/` | **Perception**: Traverses `AXUIElement` trees + Apple `Vision` OCR (`IoU > 0.45` deduplication) + `dHash` fingerprints + SoM annotation + `--diff` incremental comparison.<br/>**Execution**: **3-tier routing** (Tier 1 native `AXPress`/`AXValue` → Tier 2 background `CGEvent.postToPid` → Tier 3 hardware `CGEvent` fallback), transactional pasteboard typing, browser DOM/JS bridge, and window sandboxing. |
+| **4. Companion Daemon & OS Layer** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | Bridges stateless CLI calls to the resident `ComputerUseX.app` via `/tmp/cux-<uid>.sock`, hosting the Control Center, bottom-right Live PiP background window preview, and screen overlay HUD. |
 
 ---
 

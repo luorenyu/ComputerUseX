@@ -140,76 +140,43 @@ cux bill --finish --agent "Codex" --model "gpt-5"
 
 ---
 
-## 🏗️ 分层架构设计
+## 🏗️ 架构设计
 
-`ComputerUseX` 由两个可执行程序（命令行/MCP 程序 `cux` 与桌面守护程序 `ComputerUseX.app`）和共享核心库 `OCUCore` 组成，整体架构自上而下划分为 **五层**：
+`ComputerUseX` 由命令行/MCP 程序 `cux`、桌面常驻程序 `ComputerUseX.app` 以及共享核心库 `OCUCore` 组成，自上而下分为 **四层架构**：
 
-```
-+-----------------------------------------------------------------------------------+
-| 第一层：Agent 协议与接入层 (Protocol & Interface Layer)                            |
-|   - MCP Server (stdio JSON-RPC 2.0)        [Sources/OCUCore/MCP/MCPServer.swift]  |
-|   - CLI 命令路由 (`cux`)                   [Sources/cux/main.swift]               |
-|   - 客户端插件与 Skill 规范                 [plugins/codex/, skills/]              |
-+-----------------------------------------+-----------------------------------------+
-                                          |
-                                          v
-+-----------------------------------------------------------------------------------+
-| 第二层：会话治理与安全审计层 (Session Governance & Security Layer)                 |
-|   - 应用访问控制与弹窗授权拦截              [Sources/OCUCore/Safety/]              |
-|   - 密码框与安全输入保护                    (检测 SecureEventInput / 密码框阻断输入)|
-|   - 审计日志与会话统计存储                  (~/.computerusex/*.jsonl)              |
-+--------------------+-----------------------------------------+--------------------+
-                     |                                         |
-                     v                                         v
-+----------------------------------------+ +----------------------------------------+
-| 第三层：多模态感知与定位层             | | 第四层：混合动作执行层                 |
-| (Hybrid Perception Layer)              | | (Hybrid Action Execution Layer)        |
-| - AX 树遍历与语义剪枝 (`AXUIElement`)  | | - Tier 1: 原生 AX (`AXPress`/`AXValue`)|
-|   [Sources/OCUCore/AX/AXEngine.swift]  | | - Tier 2: 后台进程级合成 (`postToPid`) |
-| - Apple Vision OCR 与 IoU 融合去重     | | - Tier 3: 前台硬件级 `CGEvent` 兜底    |
-|   [Sources/OCUCore/OCR/]               | |   [Sources/OCUCore/Action/]            |
-| - 窗口级截图、dHash 指纹与 SoM 标注    | | - 浏览器 DOM/JS 桥接 (JXA/AppleScript) |
-|   [Sources/OCUCore/Capture/]           | |   [Sources/OCUCore/Browser/]           |
-| - 增量快照对比引擎 (Diff Engine)       | | - 窗口边缘沙箱管理 (Ghost Space)       |
-|   [Sources/OCUCore/Perception/]        | |   [Sources/OCUCore/Sandbox/]           |
-+--------------------+-------------------+ +-------------------+--------------------+
-                     |                                         |
-                     +--------------------+--------------------+
-                                          | Unix Domain Socket (/tmp/cux-<uid>.sock)
-                                          v
-+-----------------------------------------------------------------------------------+
-| 第五层：常驻守护进程与视觉反馈层 (Companion Daemon & Feedback Layer)               |
-|   - Unix Socket IPC 通信服务端/客户端       [Sources/OCUCore/IPC/UnixSocketIPC]    |
-|   - 状态栏控制器与「电脑操控中心」主面板    [Sources/ComputerUseXApp/MainDashboard]|
-|   - 后台窗口实时画中画 (PiP) 预览流         [Sources/ComputerUseXApp/MiniWindow]   |
-|   - 免焦点鼠标穿透桌面提示层 (Overlay HUD)  [Sources/ComputerUseXApp/AgentCursor]  |
-+-----------------------------------------------------------------------------------+
+```mermaid
+flowchart TB
+    subgraph L1["1. 协议与客户端接入层 (Agent Interface Layer)"]
+        direction LR
+        L1_A["MCP Server (stdio JSON-RPC 2.0)"] ~~~ L1_B["cux CLI 命令行"] ~~~ L1_C["Codex Plugin & Agent Skills"]
+    end
+
+    subgraph L2["2. 会话治理与安全审计层 (Governance & Security Layer)"]
+        direction LR
+        L2_A["应用权限白名单与弹窗授权"] ~~~ L2_B["密码框与安全输入保护"] ~~~ L2_C["@eX 状态映射 / 审计日志 / 会话统计"]
+    end
+
+    subgraph L3["3. 核心感知与动作引擎层 (Core Perception & Action Engine)"]
+        direction LR
+        L3_A["多模态感知管线<br/>AXUIElement 树 · Vision OCR · SoM 标注 · 增量 Diff"] ~~~ L3_B["混合动作执行管线<br/>AXPress / 后台 postToPid / 浏览器桥接 / 窗口沙箱"]
+    end
+
+    subgraph L4["4. 守护进程与系统适配层 (Companion Daemon & OS Layer)"]
+        direction LR
+        L4_A["Unix Socket IPC"] ~~~ L4_B["ComputerUseX.app 电脑操控中心"] ~~~ L4_C["后台实时画中画 (PiP) & 桌面指示层"]
+    end
+
+    L1 --> L2 --> L3 --> L4
 ```
 
-### 各层核心职责
+### 各层职责与模块映射
 
-1. **第一层：Agent 协议与接入层（`MCP` + `CLI` + `Plugins`）**
-   - 负责解析来自 MCP 客户端（`cux mcp`）的 JSON-RPC 2.0 请求或命令行参数（`cux snapshot`、`cux click` 等）。
-   - 维护元素引用映射表（`@e1` -> `UIElementNode`），并将最新快照持久化至 `~/.computerusex/last_snapshot.json`，使得无状态的多次 CLI 调用之间能够共享同一套 `@eX` 元素引用。
-2. **第二层：会话治理与安全审计层（`Safety`）**
-   - 在每次感知与动作执行前进行统一拦截校验。
-   - 检查目标应用是否在用户允许范围内（支持全局放行或按 Bundle ID 白名单管控；遇到未授权应用时通过 IPC 唤起原生授权确认弹窗）。
-   - 检测 macOS `IsSecureEventInputEnabled()` 状态与 `AXSecureTextField` 密码框角色，自动拒绝在密码输入框上回显或注入敏感按键。
-   - 将每次工具调用的耗时、目标应用及会话统计以追加写（Append-Only JSONL）方式记录至 `~/.computerusex/`。
-3. **第三层：多模态感知与定位层（`AX` + `OCR` + `Capture` + `Perception`）**
-   - **AX 引擎**：带深度与节点上限保护地遍历目标应用的 `AXUIElement` 树，归一化角色、标题、值、可用状态与屏幕坐标框。
-   - **Vision OCR 引擎**：针对目标窗口的 `CGWindowListCreateImage` 缓冲区执行 `VNRecognizeTextRequest` 识别，并通过 `IoU > 0.45` 阈值过滤掉已存在 AX 节点的重复文本区域。
-   - **截图与 SoM 渲染器**：计算 64 位感知哈希（`dHash`）以判断画面是否发生实质变化，并在需要时绘制 `@eX` 视觉锚点标注图。
-   - **增量对比引擎**：对比前后两次快照节点集合，仅输出新增、消失或属性变化的节点（`--diff`）。
-4. **第四层：混合动作执行层（`Action` + `Browser` + `Sandbox`）**
-   - 采用 **三级动作路由策略**：
-     - **Tier 1（原生无障碍直接触发）**：直接对目标 `AXUIElement` 调用 `AXPress`、`AXRaise` 或写入 `kAXValueAttribute`。
-     - **Tier 2（后台进程级事件合成）**：构造窗口级合成焦点并通过 `CGEvent.postToPid` 直接将鼠标/键盘事件发送给目标进程，实现在后台完成点击与输入而不移动物理鼠标。
-     - **Tier 3（前台硬件事件兜底）**：当部分非标应用忽略后台事件时，回退至屏幕级 `CGEvent` 注入。
-   - 内置事务性剪贴板输入机制（写入前备份用户剪贴板内容，粘贴完成后自动还原），确保中英文及符号稳定输入。
-5. **第五层：常驻守护进程与视觉反馈层（`IPC` + `ComputerUseXApp`）**
-   - 由于 CLI 或单次脚本调用是短生命周期进程，图形界面与跨步骤状态由常驻的 `ComputerUseX.app` 承载。
-   - `cux` 通过低延迟 Unix Domain Socket（`/tmp/cux-<uid>.sock`）向 `ComputerUseX.app` 发送事件，驱动桌面操作位置提示、在多步任务期间保持右下角画中画（PiP）实时预览窗口开启，以及提供「电脑操控中心」管理界面。
+| 架构分层 | 核心模块 | 源码目录 | 核心职责说明 |
+| :--- | :--- | :--- | :--- |
+| **第一层：协议与客户端接入层** | `MCPServer`<br/>`cux` CLI<br/>`Plugins & Skills` | `Sources/OCUCore/MCP/`<br/>`Sources/cux/`<br/>`plugins/codex/` | 解析 MCP (`stdio` JSON-RPC 2.0) 与 CLI 子命令请求；提供 OpenAI Codex 原生插件与通用 Skill 定义。 |
+| **第二层：会话治理与安全审计层** | `AuditAndSecurityGuard`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | 拦截未授权应用访问并触发弹窗授权；检测 `SecureEventInput` 与密码框防止敏感输入泄露；维护跨调用 `@e1..@eN` 映射表与 `~/.computerusex/` 审计统计。 |
+| **第三层：核心感知与动作引擎层** | **感知**：`AXEngine` / `VisionOCR` / `Capture` / `Diff`<br/>**执行**：`ActionExecutor` / `BrowserBridge` / `Sandbox` | `Sources/OCUCore/AX/`<br/>`Sources/OCUCore/OCR/`<br/>`Sources/OCUCore/Capture/`<br/>`Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Browser/`<br/>`Sources/OCUCore/Sandbox/` | **多模态感知**：遍历 `AXUIElement` 树 + Apple `Vision` 端侧 OCR（`IoU > 0.45` 去重融合）+ `dHash` 指纹 + SoM 标注 + `--diff` 增量对比。<br/>**三级动作执行**：Tier 1 原生 `AXPress`/`AXValue` → Tier 2 后台进程级 `CGEvent.postToPid` → Tier 3 硬件 `CGEvent` 兜底；含浏览器免焦点 DOM/JS 桥接与窗口边缘沙箱。 |
+| **第四层：守护进程与系统适配层** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | 通过 `/tmp/cux-<uid>.sock` 连接无状态 CLI 与常驻 `ComputerUseX.app`，承载「电脑操控中心」主面板、右下角后台窗口实时画中画（PiP）预览流及桌面操作指示层。 |
 
 ---
 
@@ -218,7 +185,7 @@ cux bill --finish --agent "Codex" --model "gpt-5"
 `ComputerUseX` 在 `Sources/OCUCore/` 内部对数据结构（`UIElementNode`、`SnapshotResult`）与底层系统 API 进行了模块解耦，后续架构可沿以下方向扩展：
 
 ### 1. 跨平台系统驱动抽象（Linux & Windows 扩展支持）
-目前第一层（MCP/CLI）、第二层（安全审计与账单）、第三层的快照 Diff 引擎与 IoU 融合逻辑均基于平台无关的 Swift 模型。后续可将第三、四层的系统原生调用抽象为统一的平台驱动协议（`PlatformPerceptionDriver` / `PlatformActionDriver`）：
+目前第一层（MCP/CLI）、第二层（安全审计与账单）、第三层的快照 Diff 引擎与 IoU 融合逻辑均基于平台无关的 Swift 模型。后续可将第三层的系统原生调用抽象为统一的平台驱动协议（`PlatformPerceptionDriver` / `PlatformActionDriver`）：
 - **macOS（当前）**：`AXUIElement` + Apple `Vision` + `CoreGraphics`。
 - **Linux（规划）**：基于 `AT-SPI2` 无障碍总线 + `X11`（`XTest` / `XComposite`）/ `Wayland`（`wlr-screencopy`）+ ONNX/Tesseract OCR。
 - **Windows（规划）**：基于 Windows `UIAutomation`（`IUIAutomation`）+ `WinRT GraphicsCapture` + `SendInput` / `Windows.Media.Ocr`。
@@ -236,7 +203,7 @@ cux bill --finish --agent "Codex" --model "gpt-5"
 结合系统事件监听与第三层的语义快照，将人工演示操作录制为基于语义选择器（`@eX` 的 `role` + `title` 约束，而非脆弱的固定屏幕坐标）的 `cux batch` 脚本，或一键导出为可复用的 Agent Skill。
 
 ### 5. 远程与虚拟机沙箱执行目标（Remote / VM Target）
-由于接入层（Layer 1–2）与执行层（Layer 3–5）之间通过结构化指令与 IPC 协议通信，后续支持通过 SSH 或 gRPC 将 `cux` 指令转发至基于 macOS `Virtualization.framework`（如 Tart）的隔离虚拟机中执行，使高风险自动化任务在独立虚拟桌面内运行，同时将画面流式回传至宿主机右下角预览窗。
+由于接入治理层（第一、二层）与核心执行层（第三、四层）之间通过结构化指令与 IPC 协议通信，后续支持通过 SSH 或 gRPC 将 `cux` 指令转发至基于 macOS `Virtualization.framework`（如 Tart）的隔离虚拟机中执行，使高风险自动化任务在独立虚拟桌面内运行，同时将画面流式回传至宿主机右下角预览窗。
 
 ---
 
