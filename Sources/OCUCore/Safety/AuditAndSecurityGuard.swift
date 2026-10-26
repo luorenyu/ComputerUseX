@@ -384,21 +384,161 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             try upsertJSONMCPServer(at: home.appendingPathComponent(".cursor/mcp.json"))
         }
         if lowerTarget == "all" || lowerTarget == "codex" {
-            let codexURL = home.appendingPathComponent(".codex/config.toml")
+            let codexDir = home.appendingPathComponent(".codex", isDirectory: true)
+            let codexURL = codexDir.appendingPathComponent("config.toml")
             try FileManager.default.createDirectory(
-                at: codexURL.deletingLastPathComponent(),
+                at: codexDir,
                 withIntermediateDirectories: true
             )
-            var toml = (try? String(contentsOf: codexURL, encoding: .utf8)) ?? ""
-            let sectionHeader = "[mcp_servers.computer_use_x]"
-            let block = """
-            \(sectionHeader)
-            command = "\(resolvedBin)"
-            args = ["mcp"]
+
+            // 1. Install Codex Skill (~/.codex/skills/computer-use-x/SKILL.md)
+            let skillDir = codexDir.appendingPathComponent("skills/computer-use-x", isDirectory: true)
+            try FileManager.default.createDirectory(at: skillDir, withIntermediateDirectories: true)
+            let skillMDContent = """
+            ---
+            name: computer-use-x
+            description: "Controls macOS GUI applications and desktop interfaces in the background without stealing mouse focus using ComputerUseX (`cux`) Tri-Modal Grounding (AXUIElement + Apple Vision OCR + SoM), persistent Live PiP preview window, Gemini Aurora HUD, and session billing."
+            disable-model-invocation: false
+            ---
+
+            # ComputerUseX (`cux`) — Zero-Focus Desktop Computer Use Skill for Codex
+
+            Use `cux_*` MCP tools (`cux_snapshot`, `cux_click`, `cux_type`, `cux_batch`, `cux_browser`, `cux_bill`) or the `cux` CLI (`\(resolvedBin)`) with `--agent "Codex"` to inspect and operate macOS apps in the background without hijacking the user's physical mouse cursor. Always run `cux bill --finish --agent "Codex"` when the task completes.
             """
+            let skillFileURL = skillDir.appendingPathComponent("SKILL.md")
+            try skillMDContent.write(to: skillFileURL, atomically: true, encoding: .utf8)
+            updatedPaths.append(skillFileURL.path)
+
+            // 2. Install Codex Native Plugin Bundle (~/.computerusex/codex-marketplace & ~/.codex/plugins/cache/computer-use-x)
+            let marketplaceRoot = self.baseDirectory.appendingPathComponent("codex-marketplace", isDirectory: true)
+            let marketplaceMetaDir = marketplaceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
+            let pluginBundleDir = marketplaceRoot.appendingPathComponent("plugins/computer-use-x", isDirectory: true)
+            let codexPluginCacheDir = codexDir.appendingPathComponent("plugins/cache/computer-use-x/computer-use-x/1.0.0", isDirectory: true)
+
+            for targetPluginDir in [pluginBundleDir, codexPluginCacheDir] {
+                let metaDir = targetPluginDir.appendingPathComponent(".codex-plugin", isDirectory: true)
+                let pSkillDir = targetPluginDir.appendingPathComponent("skills/computer-use-x", isDirectory: true)
+                let assetsDir = targetPluginDir.appendingPathComponent("assets", isDirectory: true)
+                try FileManager.default.createDirectory(at: metaDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: pSkillDir, withIntermediateDirectories: true)
+                try FileManager.default.createDirectory(at: assetsDir, withIntermediateDirectories: true)
+
+                let mcpJSON = """
+                {
+                  "mcpServers": {
+                    "computer-use-x": {
+                      "command": "\(resolvedBin)",
+                      "args": ["mcp"],
+                      "enabled": true
+                    }
+                  }
+                }
+                """
+                try mcpJSON.write(to: targetPluginDir.appendingPathComponent(".mcp.json"), atomically: true, encoding: .utf8)
+                try skillMDContent.write(to: pSkillDir.appendingPathComponent("SKILL.md"), atomically: true, encoding: .utf8)
+
+                let pluginJSON = """
+                {
+                  "name": "computer-use-x",
+                  "version": "1.0.0",
+                  "description": "Zero-focus native macOS Computer Use engine (AXUIElement + Apple Vision OCR + Live PiP Preview + Gemini Aurora HUD + Session Billing).",
+                  "author": {
+                    "name": "ComputerUseX",
+                    "url": "https://github.com/luorenyu/ComputerUseX"
+                  },
+                  "homepage": "https://github.com/luorenyu/ComputerUseX",
+                  "repository": "https://github.com/luorenyu/ComputerUseX",
+                  "license": "MIT",
+                  "keywords": ["computer-use", "computer-use-x", "cux", "macos", "automation", "accessibility", "mcp"],
+                  "skills": "./skills/",
+                  "mcpServers": "./.mcp.json",
+                  "interface": {
+                    "displayName": "ComputerUseX",
+                    "shortDescription": "Zero-focus background Computer Use engine with Live PiP & Gemini HUD",
+                    "longDescription": "ComputerUseX (cux) lets Codex operate macOS desktop apps in the background without hijacking your physical mouse or stealing window focus, featuring Tri-Modal Grounding (AX + Vision OCR + SoM), a persistent bottom-right Live PiP preview window, and full task session billing.",
+                    "developerName": "ComputerUseX",
+                    "category": "Productivity",
+                    "capabilities": ["Interactive", "Read", "Write"],
+                    "websiteURL": "https://github.com/luorenyu/ComputerUseX",
+                    "logo": "./assets/app-icon.png",
+                    "logoDark": "./assets/app-icon.png",
+                    "composerIcon": "./assets/app-icon.png",
+                    "defaultPrompt": [
+                      "Use ComputerUseX to inspect WeChat in the background and send a message",
+                      "Open ComputerUseX Control Center and run the visual HUD demo",
+                      "Check current ComputerUseX session billing receipt"
+                    ],
+                    "brandColor": "#4285F4",
+                    "screenshots": []
+                  }
+                }
+                """
+                try pluginJSON.write(to: metaDir.appendingPathComponent("plugin.json"), atomically: true, encoding: .utf8)
+
+                let bundledIcon = "/Applications/ComputerUseX.app/Contents/Resources/app-icon.png"
+                if FileManager.default.fileExists(atPath: bundledIcon) {
+                    let dstIcon = assetsDir.appendingPathComponent("app-icon.png")
+                    try? FileManager.default.removeItem(at: dstIcon)
+                    try? FileManager.default.copyItem(atPath: bundledIcon, toPath: dstIcon.path)
+                }
+            }
+
+            try FileManager.default.createDirectory(at: marketplaceMetaDir, withIntermediateDirectories: true)
+            let marketplaceJSON = """
+            {
+              "name": "computer-use-x",
+              "plugins": [
+                {
+                  "name": "computer-use-x",
+                  "source": {
+                    "source": "local",
+                    "path": "./plugins/computer-use-x"
+                  },
+                  "policy": {
+                    "installation": "AVAILABLE",
+                    "authentication": "ON_USE"
+                  },
+                  "category": "Productivity"
+                }
+              ]
+            }
+            """
+            try marketplaceJSON.write(to: marketplaceMetaDir.appendingPathComponent("marketplace.json"), atomically: true, encoding: .utf8)
+
+            // 3. Register Marketplace, Plugin, and MCP Server in ~/.codex/config.toml
+            var toml = (try? String(contentsOf: codexURL, encoding: .utf8)) ?? ""
+            var appendedBlocks: [String] = []
+
+            let marketplaceHeader = "[marketplaces.computer-use-x]"
+            if !toml.contains(marketplaceHeader) {
+                appendedBlocks.append("""
+                \(marketplaceHeader)
+                source_type = "local"
+                source = "\(marketplaceRoot.path)"
+                """)
+            }
+
+            let pluginHeader = "[plugins.\"computer-use-x@computer-use-x\"]"
+            if !toml.contains(pluginHeader) {
+                appendedBlocks.append("""
+                \(pluginHeader)
+                enabled = true
+                """)
+            }
+
+            let sectionHeader = "[mcp_servers.computer_use_x]"
             if !toml.contains(sectionHeader) {
+                appendedBlocks.append("""
+                \(sectionHeader)
+                type = "stdio"
+                command = "\(resolvedBin)"
+                args = ["mcp"]
+                """)
+            }
+
+            if !appendedBlocks.isEmpty {
                 if !toml.isEmpty && !toml.hasSuffix("\n") { toml.append("\n") }
-                toml.append("\n\(block)\n")
+                toml.append("\n" + appendedBlocks.joined(separator: "\n\n") + "\n")
                 try toml.write(to: codexURL, atomically: true, encoding: .utf8)
             }
             updatedPaths.append(codexURL.path)

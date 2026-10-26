@@ -15,7 +15,9 @@ if [[ -w "/Applications" ]]; then
 fi
 
 echo "🎉 Installed 'cux' to ${INSTALL_BIN_DIR}/cux"
-echo "📌 MCP Server Configuration (Antigravity / Claude / Cursor / Windsurf):"
+"${INSTALL_BIN_DIR}/cux" install-mcp all || true
+
+echo "📌 MCP Server Configuration (Antigravity / Claude / Codex / Cursor / Windsurf):"
 cat <<EOF
 {
   "mcpServers": {

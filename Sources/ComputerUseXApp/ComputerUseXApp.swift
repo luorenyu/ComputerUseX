@@ -133,6 +133,19 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
             .statusPill(title: "已复制 MCP 配置 JSON", subtitle: resolvedPath)
         )
     }
+
+    public func installToAllAgentsAndCodexPlugin() {
+        DispatchQueue.global(qos: .userInitiated).async {
+            if let outcome = try? AuditAndSecurityGuard.shared.installMCPConfiguration(target: "all") {
+                OverlayHUDWindowController.shared.viewModel.handle(
+                    .statusPill(
+                        title: "已安装 Codex 插件 / Skill 与 MCP 配置",
+                        subtitle: outcome.details ?? "Codex · Claude · Gemini · Cursor"
+                    )
+                )
+            }
+        }
+    }
 }
 
 @main

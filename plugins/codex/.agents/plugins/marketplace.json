@@ -1,0 +1,17 @@
+{
+  "name": "computer-use-x",
+  "plugins": [
+    {
+      "name": "computer-use-x",
+      "source": {
+        "source": "local",
+        "path": "./plugins/computer-use-x"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_USE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}

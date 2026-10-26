@@ -546,6 +546,29 @@ struct MainDashboardRootView: View {
 
                     Spacer()
 
+                    // One-click Install Codex Plugin / Skill / MCP Button
+                    Button(action: {
+                        DaemonAppCoordinator.shared.installToAllAgentsAndCodexPlugin()
+                    }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "puzzlepiece.extension.fill")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(GeminiPalette.textMintBright)
+                            Text("安装至 Codex / Claude")
+                                .font(.system(size: 12, weight: .medium))
+                        }
+                        .foregroundColor(.white.opacity(0.92))
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 7)
+                        .background(
+                            Capsule()
+                                .fill(GeminiPalette.surfaceCard)
+                                .overlay(Capsule().strokeBorder(Color.white.opacity(0.14), lineWidth: 1))
+                        )
+                    }
+                    .buttonStyle(.plain)
+                    .help("一键将 ComputerUseX 插件、Skill 与 MCP Server 集成到 OpenAI Codex、Claude、Gemini 和 Cursor")
+
                     // One-click Copy MCP Config Button
                     Button(action: {
                         DaemonAppCoordinator.shared.copyMCPConfigToClipboard()

@@ -24,7 +24,9 @@ cp "${ROOT_DIR}/.build/release/cux" "${DIST_DIR}/cux"
 chmod +x "${MACOS_DIR}/ComputerUseXApp" "${MACOS_DIR}/cux" "${DIST_DIR}/cux" "${ROOT_DIR}/scripts/generate-icon.swift"
 
 echo "🎨 Generating Google Gemini Aurora AppIcon.icns..."
-swift "${ROOT_DIR}/scripts/generate-icon.swift" "${RESOURCES_DIR}/AppIcon.icns"
+swift "${ROOT_DIR}/scripts/generate-icon.swift" "${RESOURCES_DIR}/AppIcon.icns" "${RESOURCES_DIR}/app-icon.png"
+mkdir -p "${ROOT_DIR}/plugins/codex/plugins/computer-use-x/assets"
+cp "${RESOURCES_DIR}/app-icon.png" "${ROOT_DIR}/plugins/codex/plugins/computer-use-x/assets/app-icon.png"
 
 # Prefer a deterministic Apple Development certificate (sorted by name) so rebuilds keep macOS TCC permissions;
 # otherwise fall back to ad-hoc signature.

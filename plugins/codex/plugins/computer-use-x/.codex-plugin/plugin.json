@@ -1,0 +1,46 @@
+{
+  "name": "computer-use-x",
+  "version": "1.0.0",
+  "description": "Zero-focus native macOS Computer Use engine (AXUIElement + Apple Vision OCR + Live PiP Preview + Gemini Aurora HUD + Session Billing).",
+  "author": {
+    "name": "ComputerUseX",
+    "url": "https://github.com/luorenyu/ComputerUseX"
+  },
+  "homepage": "https://github.com/luorenyu/ComputerUseX",
+  "repository": "https://github.com/luorenyu/ComputerUseX",
+  "license": "MIT",
+  "keywords": [
+    "computer-use",
+    "computer-use-x",
+    "cux",
+    "macos",
+    "automation",
+    "accessibility",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "ComputerUseX",
+    "shortDescription": "Zero-focus background Computer Use engine with Live PiP & Gemini HUD",
+    "longDescription": "ComputerUseX (cux) lets Codex operate macOS desktop apps in the background without hijacking your physical mouse or stealing window focus, featuring Tri-Modal Grounding (AX + Vision OCR + SoM), a persistent bottom-right Live PiP preview window, and full task session billing.",
+    "developerName": "ComputerUseX",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/luorenyu/ComputerUseX",
+    "logo": "./assets/app-icon.png",
+    "logoDark": "./assets/app-icon.png",
+    "composerIcon": "./assets/app-icon.png",
+    "defaultPrompt": [
+      "Use ComputerUseX to inspect WeChat in the background and send a message",
+      "Open ComputerUseX Control Center and run the visual HUD demo",
+      "Check current ComputerUseX session billing receipt"
+    ],
+    "brandColor": "#4285F4",
+    "screenshots": []
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "computer-use-x": {
+      "command": "/Applications/ComputerUseX.app/Contents/MacOS/cux",
+      "args": ["mcp"],
+      "enabled": true
+    }
+  }
+}

@@ -203,6 +203,13 @@ for item in sizes {
     try savePNG(img, to: tempIconset.appendingPathComponent(item.name), pixelSize: item.pixels)
 }
 
+if CommandLine.arguments.count > 2 {
+    let pngOutURL = URL(fileURLWithPath: CommandLine.arguments[2])
+    try? FileManager.default.createDirectory(at: pngOutURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    let pngImg = renderIconImage(pixelSize: 512)
+    try savePNG(pngImg, to: pngOutURL, pixelSize: 512)
+}
+
 let proc = Process()
 proc.executableURL = URL(fileURLWithPath: "/usr/bin/iconutil")
 proc.arguments = ["-c", "icns", tempIconset.path, "-o", outputIcnsPath]
