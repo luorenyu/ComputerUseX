@@ -121,8 +121,7 @@ public struct GeminiSparkleShape: Shape {
     }
 }
 
-/// Slender, compact tailless aerodynamic cursor blade (2:3 aspect ratio)
-/// matching our real `VirtualCursorArrowShape` proportions.
+/// Proportional tailless aerodynamic cursor blade used inside the "Cursor + Sparkles" brand icon.
 public struct GeminiCursorIconBladeShape: Shape {
     public init() {}
 
@@ -131,45 +130,20 @@ public struct GeminiCursorIconBladeShape: Shape {
         let h = rect.height
         var path = Path()
         // Sharp top-left apex
-        path.move(to: CGPoint(x: rect.minX + w * 0.26, y: rect.minY + h * 0.25))
-        // Slender left blade edge (nearly vertical, matching VirtualCursorArrowShape)
-        path.addLine(to: CGPoint(x: rect.minX + w * 0.29, y: rect.minY + h * 0.69))
-        // Deep swept inner chevron notch (keeps both wings thin and sharp)
-        path.addLine(to: CGPoint(x: rect.minX + w * 0.395, y: rect.minY + h * 0.525))
-        // Sleek right wingtip (2:3 width-to-height ratio)
-        path.addLine(to: CGPoint(x: rect.minX + w * 0.555, y: rect.minY + h * 0.475))
+        path.move(to: CGPoint(x: rect.minX + w * 0.06, y: rect.minY + h * 0.08))
+        // Left aerodynamic blade edge
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.14, y: rect.minY + h * 0.94))
+        // Swept inner chevron notch (tailless futuristic profile)
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.41, y: rect.minY + h * 0.66))
+        // Right high-speed wingtip
+        path.addLine(to: CGPoint(x: rect.minX + w * 0.84, y: rect.minY + h * 0.54))
         path.closeSubpath()
         return path
     }
 }
 
-/// Tapered comet arc ribbon flowing from behind the cursor's notch towards the bottom-right.
-public struct GeminiCometArcShape: Shape {
-    public init() {}
-
-    public func path(in rect: CGRect) -> Path {
-        let w = rect.width
-        let h = rect.height
-        var path = Path()
-        // Start slightly behind the cursor notch with a subtle ribbon width, tapering to a point at bottom-right
-        path.move(to: CGPoint(x: rect.minX + w * 0.42, y: rect.minY + h * 0.52))
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + w * 0.92, y: rect.minY + h * 0.86),
-            control: CGPoint(x: rect.minX + w * 0.62, y: rect.minY + h * 0.74)
-        )
-        path.addQuadCurve(
-            to: CGPoint(x: rect.minX + w * 0.38, y: rect.minY + h * 0.56),
-            control: CGPoint(x: rect.minX + w * 0.58, y: rect.minY + h * 0.80)
-        )
-        path.closeSubpath()
-        return path
-    }
-}
-
-/// Unified "Cursor + Comet Arc Sparkles (彗星弧线星芒)" Brand Icon View:
-/// - Largest sparkle star right in front of the cursor tip (top-left)
-/// - Slender 2:3 tailless Cursor blade
-/// - Sweeping comet arc towards bottom-right with progressively smaller sparkles along the arc
+/// Unified "Cursor + Sparkles (星芒)" Brand Icon View:
+/// Replaces the largest star with our aerodynamic tailless Cursor blade paired with companion Gemini sparkle stars.
 public struct GeminiSparkleIcon: View {
     public var size: CGFloat = 18
     public var showHalo: Bool = true
@@ -200,35 +174,15 @@ public struct GeminiSparkleIcon: View {
             }
 
             ZStack(alignment: .topLeading) {
-                // 1. Sweeping Comet Tail Arc Ribbon (from cursor notch to bottom-right)
-                GeminiCometArcShape()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                GeminiPalette.skyBlue.opacity(0.75),
-                                GeminiPalette.violet.opacity(0.55),
-                                GeminiPalette.coral.opacity(0.25)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-
-                // 2. Sparkle #1 (LARGEST — In front of the Cursor Tip at Top-Left)
-                GeminiSparkleShape()
-                    .fill(GeminiPalette.auroraGradient)
-                    .frame(width: size * 0.30, height: size * 0.30)
-                    .offset(x: size * 0.01, y: size * 0.01)
-
-                // 3. Central Slender 2:3 Tailless Cursor Blade
+                // 1. Primary Element: Aerodynamic Tailless Cursor Blade
                 GeminiCursorIconBladeShape()
                     .fill(GeminiPalette.auroraGradient)
                     .overlay(
                         GeminiCursorIconBladeShape()
-                            .stroke(Color.white.opacity(0.75), lineWidth: max(0.45, size * 0.035))
+                            .stroke(Color.white.opacity(0.65), lineWidth: max(0.5, size * 0.04))
                     )
 
-                // 4. Sparkle #2 (MEDIUM — First trailing star on the comet arc behind the cursor)
+                // 2. Companion Medium 4-Point Gemini Sparkle (Top-Right)
                 GeminiSparkleShape()
                     .fill(
                         LinearGradient(
@@ -237,26 +191,14 @@ public struct GeminiSparkleIcon: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(width: size * 0.23, height: size * 0.23)
-                    .offset(x: size * 0.45, y: size * 0.56)
+                    .frame(width: size * 0.42, height: size * 0.42)
+                    .offset(x: size * 0.56, y: size * 0.02)
 
-                // 5. Sparkle #3 (SMALL — Second trailing star along the comet arc)
-                GeminiSparkleShape()
-                    .fill(
-                        LinearGradient(
-                            colors: [GeminiPalette.violet, GeminiPalette.coral],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: size * 0.165, height: size * 0.165)
-                    .offset(x: size * 0.66, y: size * 0.70)
-
-                // 6. Sparkle #4 (TINY — Tail-end star at Bottom-Right of the comet arc)
+                // 3. Companion Small 4-Point Gemini Sparkle (Upper-Middle Accent)
                 GeminiSparkleShape()
                     .fill(Color.white.opacity(0.92))
-                    .frame(width: size * 0.115, height: size * 0.115)
-                    .offset(x: size * 0.83, y: size * 0.79)
+                    .frame(width: size * 0.22, height: size * 0.22)
+                    .offset(x: size * 0.36, y: size * 0.0)
             }
             .frame(width: size, height: size)
             .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 4, x: 0, y: 0)
@@ -265,7 +207,7 @@ public struct GeminiSparkleIcon: View {
     }
 }
 
-/// Renders the unified "Cursor + Comet Arc Sparkles" icon as a native AppKit template `NSImage` for the macOS MenuBar (`NSStatusItem`).
+/// Renders the unified "Cursor + Sparkles" icon as a native AppKit template `NSImage` for the macOS MenuBar (`NSStatusItem`).
 public enum GeminiBrandIconRenderer {
     public static func statusBarImage(pointSize: CGFloat = 18) -> NSImage {
         let img = NSImage(size: NSSize(width: pointSize, height: pointSize), flipped: true) { rect in
@@ -277,34 +219,19 @@ public enum GeminiBrandIconRenderer {
             ctx.setShouldAntialias(true)
             ctx.setFillColor(NSColor.black.cgColor)
 
-            // 1. Tapered Comet Tail Arc Ribbon (from behind cursor notch to bottom-right)
-            let arcPath = CGMutablePath()
-            arcPath.move(to: CGPoint(x: w * 0.42, y: h * 0.52))
-            arcPath.addQuadCurve(
-                to: CGPoint(x: w * 0.92, y: h * 0.86),
-                control: CGPoint(x: w * 0.62, y: h * 0.74)
-            )
-            arcPath.addQuadCurve(
-                to: CGPoint(x: w * 0.38, y: h * 0.56),
-                control: CGPoint(x: w * 0.58, y: h * 0.80)
-            )
-            arcPath.closeSubpath()
-            ctx.addPath(arcPath)
-            ctx.fillPath()
-
-            // 2. Slender 2:3 Tailless Cursor Blade
+            // 1. Primary Aerodynamic Tailless Cursor Blade (bottom-left to center)
             let cursorPath = CGMutablePath()
-            cursorPath.move(to: CGPoint(x: w * 0.26, y: h * 0.25))
-            cursorPath.addLine(to: CGPoint(x: w * 0.29, y: h * 0.69))
-            cursorPath.addLine(to: CGPoint(x: w * 0.395, y: h * 0.525))
-            cursorPath.addLine(to: CGPoint(x: w * 0.555, y: h * 0.475))
+            cursorPath.move(to: CGPoint(x: w * 0.06, y: h * 0.10))
+            cursorPath.addLine(to: CGPoint(x: w * 0.14, y: h * 0.94))
+            cursorPath.addLine(to: CGPoint(x: w * 0.41, y: h * 0.66))
+            cursorPath.addLine(to: CGPoint(x: w * 0.84, y: h * 0.54))
             cursorPath.closeSubpath()
             ctx.addPath(cursorPath)
             ctx.fillPath()
 
             // Helper to draw a concave 4-point Gemini sparkle star in flipped coordinates
             func addSparkle(center: CGPoint, radius: CGFloat) {
-                let inset = radius * 0.23
+                let inset = radius * 0.24
                 let p = CGMutablePath()
                 p.move(to: CGPoint(x: center.x, y: center.y - radius))
                 p.addQuadCurve(to: CGPoint(x: center.x + radius, y: center.y), control: CGPoint(x: center.x + inset, y: center.y - inset))
@@ -316,17 +243,11 @@ public enum GeminiBrandIconRenderer {
                 ctx.fillPath()
             }
 
-            // 3. Sparkle #1 (LARGEST — In front of Cursor Tip at Top-Left)
-            addSparkle(center: CGPoint(x: w * 0.16, y: h * 0.16), radius: w * 0.15)
+            // 2. Medium Companion Sparkle (Top-Right)
+            addSparkle(center: CGPoint(x: w * 0.77, y: h * 0.24), radius: w * 0.21)
 
-            // 4. Sparkle #2 (MEDIUM — First trailing star on the comet arc)
-            addSparkle(center: CGPoint(x: w * 0.565, y: h * 0.675), radius: w * 0.115)
-
-            // 5. Sparkle #3 (SMALL — Second trailing star along the comet arc)
-            addSparkle(center: CGPoint(x: w * 0.74, y: h * 0.78), radius: w * 0.085)
-
-            // 6. Sparkle #4 (TINY — Tail-end star at Bottom-Right)
-            addSparkle(center: CGPoint(x: w * 0.89, y: h * 0.85), radius: w * 0.058)
+            // 3. Small Companion Sparkle (Upper-Middle)
+            addSparkle(center: CGPoint(x: w * 0.47, y: h * 0.12), radius: w * 0.11)
 
             return true
         }
