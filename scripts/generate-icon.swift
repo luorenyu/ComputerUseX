@@ -105,28 +105,60 @@ func renderIconImage(pixelSize: Int) -> NSImage {
         ctx.restoreGState()
     }
 
-    // Orbiting Sparkle #1 (Upper-Right)
-    drawSparkleStar(
-        center: CGPoint(x: rect.minX + rect.width * 0.78, y: rect.minY + rect.height * 0.76),
-        radius: rect.width * 0.14
+    // 4. Tapered Comet Tail Arc Ribbon (from cursor notch to bottom-right)
+    let arcPath = CGMutablePath()
+    arcPath.move(to: CGPoint(x: rect.minX + rect.width * 0.42, y: rect.minY + rect.height * 0.48))
+    arcPath.addQuadCurve(
+        to: CGPoint(x: rect.minX + rect.width * 0.90, y: rect.minY + rect.height * 0.15),
+        control: CGPoint(x: rect.minX + rect.width * 0.62, y: rect.minY + rect.height * 0.26)
     )
-    // Orbiting Sparkle #2 (Bottom-Right)
+    arcPath.addQuadCurve(
+        to: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.minY + rect.height * 0.44),
+        control: CGPoint(x: rect.minX + rect.width * 0.58, y: rect.minY + rect.height * 0.20)
+    )
+    arcPath.closeSubpath()
+
+    ctx.saveGState()
+    ctx.addPath(arcPath)
+    ctx.clip()
+    if let auroraGrad = CGGradient(colorsSpace: colorSpace, colors: auroraColors, locations: [0.0, 0.35, 0.70, 1.0]) {
+        ctx.drawLinearGradient(
+            auroraGrad,
+            start: CGPoint(x: rect.minX + rect.width * 0.38, y: rect.minY + rect.height * 0.48),
+            end: CGPoint(x: rect.minX + rect.width * 0.90, y: rect.minY + rect.height * 0.15),
+            options: []
+        )
+    }
+    ctx.restoreGState()
+
+    // 5. Sparkles along the Top-Left -> Bottom-Right Comet Arc (Largest in front of tip, tapering smaller behind)
+    // Sparkle #1 (LARGEST — In front of Cursor Tip at Top-Left)
     drawSparkleStar(
-        center: CGPoint(x: rect.minX + rect.width * 0.72, y: rect.minY + rect.height * 0.22),
+        center: CGPoint(x: rect.minX + rect.width * 0.17, y: rect.minY + rect.height * 0.83),
+        radius: rect.width * 0.135
+    )
+    // Sparkle #2 (MEDIUM — First trailing star on the comet arc behind cursor)
+    drawSparkleStar(
+        center: CGPoint(x: rect.minX + rect.width * 0.565, y: rect.minY + rect.height * 0.325),
         radius: rect.width * 0.105
     )
-    // Orbiting Sparkle #3 (Left — flanking the left blade)
+    // Sparkle #3 (SMALL — Second trailing star along the comet arc)
     drawSparkleStar(
-        center: CGPoint(x: rect.minX + rect.width * 0.15, y: rect.minY + rect.height * 0.56),
-        radius: rect.width * 0.095,
+        center: CGPoint(x: rect.minX + rect.width * 0.735, y: rect.minY + rect.height * 0.22),
+        radius: rect.width * 0.078
+    )
+    // Sparkle #4 (TINY — Tail-end star at Bottom-Right of the comet arc)
+    drawSparkleStar(
+        center: CGPoint(x: rect.minX + rect.width * 0.88, y: rect.minY + rect.height * 0.155),
+        radius: rect.width * 0.052,
         fillWhite: true
     )
 
-    // 5. Central Slender Tailless Gemini Cyber-Blade Cursor (2:3 aspect ratio, surrounded by the 3 sparkles)
-    let tip = CGPoint(x: rect.minX + rect.width * 0.28, y: rect.minY + rect.height * 0.78)
-    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.315, y: rect.minY + rect.height * 0.22)
-    let notch = CGPoint(x: rect.minX + rect.width * 0.445, y: rect.minY + rect.height * 0.425)
-    let wingRight = CGPoint(x: rect.minX + rect.width * 0.64, y: rect.minY + rect.height * 0.485)
+    // 6. Slender 2:3 Tailless Gemini Cyber-Blade Cursor
+    let tip = CGPoint(x: rect.minX + rect.width * 0.26, y: rect.minY + rect.height * 0.75)
+    let wingLeft = CGPoint(x: rect.minX + rect.width * 0.29, y: rect.minY + rect.height * 0.31)
+    let notch = CGPoint(x: rect.minX + rect.width * 0.395, y: rect.minY + rect.height * 0.475)
+    let wingRight = CGPoint(x: rect.minX + rect.width * 0.555, y: rect.minY + rect.height * 0.525)
 
     let pointerPath = CGMutablePath()
     pointerPath.move(to: tip)
