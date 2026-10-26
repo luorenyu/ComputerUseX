@@ -35,13 +35,17 @@
 
 ## 🚀 一分钟快速开始
 
-### 1. 编译并一键安装
+### 1. 一行命令极速安装（或源码编译安装）
 ```bash
+# 方式 A：一行命令全自动安装（优先下载 GitHub Release 预编译包，或自动本地编译）
+curl -fsSL https://raw.githubusercontent.com/luorenyu/ComputerUseX/main/scripts/install.sh | bash
+
+# 方式 B：克隆源码并编译安装
 git clone https://github.com/luorenyu/ComputerUseX.git
 cd ComputerUseX
 ./scripts/install.sh
 ```
-脚本会自动编译 Swift 6 Release 二进制、生成 Gemini 极光图标 `AppIcon.icns`、将 `ComputerUseX.app` 安装至 `/Applications/ComputerUseX.app`，并将命令行与 MCP 工具 `cux` 软链至 `~/.local/bin/cux`。
+脚本会自动将 `ComputerUseX.app` 安装至 `/Applications/ComputerUseX.app`、将命令行工具 `cux` 软链至 `~/.local/bin/cux`，并**全自动把插件、Skill 与 MCP 服务注册到 OpenAI Codex、Claude、Antigravity/Gemini 和 Cursor** 中。
 
 ### 2. 启动守护进程并打开「电脑操控中心」
 ```bash

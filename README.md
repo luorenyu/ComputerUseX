@@ -62,13 +62,17 @@ Unlike screenshot-only Computer Use wrappers that hijack your physical mouse, ya
 
 ## 🚀 1-Minute Quick Start
 
-### 1. Build & Install
+### 1. One-Line Install (or Build from Source)
 ```bash
+# Option A: One-line installer (downloads latest release or builds automatically)
+curl -fsSL https://raw.githubusercontent.com/luorenyu/ComputerUseX/main/scripts/install.sh | bash
+
+# Option B: Clone & build from source
 git clone https://github.com/luorenyu/ComputerUseX.git
 cd ComputerUseX
 ./scripts/install.sh
 ```
-This compiles the Swift 6 release binaries, generates the Gemini Aurora `AppIcon.icns`, installs `/Applications/ComputerUseX.app`, and links `~/.local/bin/cux`.
+This installs `/Applications/ComputerUseX.app`, links `~/.local/bin/cux`, and automatically registers the **Codex Plugin & Skill**, **Claude Code / Desktop MCP**, **Gemini / Antigravity MCP**, and **Cursor MCP**.
 
 ### 2. Launch the Companion App & Open Control Center
 ```bash
