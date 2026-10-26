@@ -141,7 +141,7 @@ struct OCUCLI {
         case "hud-demo", "demo":
             return IPCRequest(command: "hud_demo")
 
-        case "apps":
+        case "apps", "focus":
             let appName = flags["focus"] ?? flags["launch"] ?? flags["app"] ?? positional.first
             var rx: Double? = nil
             var ry: Double? = nil
@@ -161,7 +161,7 @@ struct OCUCLI {
                 width: rw,
                 height: rh,
                 launch: flags["launch"] != nil || !boolFlags.contains("no-launch"),
-                focus: flags["focus"] != nil
+                focus: command == "focus" || flags["focus"] != nil
             )
 
         case "snapshot", "snap":
@@ -526,10 +526,17 @@ struct OCUCLI {
     }
 
     static func runDoctor(jsonOutput: Bool) {
-        let st = PermissionManager.shared.currentStatus(
-            daemonConnected: UnixSocketIPC.isDaemonReachable(),
-            socketPath: UnixSocketIPC.defaultSocketPath
-        )
+        let st = {
+            if UnixSocketIPC.isDaemonReachable(),
+               let resp = try? UnixSocketIPC.sendRequest(IPCRequest(command: "status")),
+               let daemonSt = resp.status {
+                return daemonSt
+            }
+            return PermissionManager.shared.currentStatus(
+                daemonConnected: UnixSocketIPC.isDaemonReachable(),
+                socketPath: UnixSocketIPC.defaultSocketPath
+            )
+        }()
         let toolsCount = MCPServer.toolDefinitions().count
         let appsCount = AppWorkspaceController.shared.listRunningApps().count
 

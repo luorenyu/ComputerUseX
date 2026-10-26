@@ -72,6 +72,22 @@ public final class AXScanner: @unchecked Sendable {
     /// web pages without requiring foreground window focus.
     public func performNativePressAtPosition(pid: Int32, point: ScreenPoint) -> String? {
         guard pid > 0 else { return nil }
+
+        // Fast Path 1: Check if current snapshot already has an interactive AX element containing `point`
+        if let snap = ElementSnapshotStore.shared.currentSnapshot(), snap.activePid == pid {
+            let candidates = snap.elements.filter { el in
+                el.source == .ax &&
+                el.role != "statictext" &&
+                el.role != "group" &&
+                point.x >= el.frame.x - 2 && point.x <= el.frame.x + el.frame.width + 2 &&
+                point.y >= el.frame.y - 2 && point.y <= el.frame.y + el.frame.height + 2
+            }.sorted { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) }
+
+            if let best = candidates.first, performNativePress(ref: best.ref) {
+                return "\(best.role):\(best.label)"
+            }
+        }
+
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, 0.6)
         AXUIElementSetAttributeValue(axApp, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
@@ -84,16 +100,15 @@ public final class AXScanner: @unchecked Sendable {
         }
 
         var current: AXUIElement? = startEl
-        for _ in 0..<6 {
+        for _ in 0..<8 {
             guard let el = current else { break }
             let role = copyStringAttribute(el, kAXRoleAttribute as String) ?? ""
             let subrole = copyStringAttribute(el, kAXSubroleAttribute as String) ?? ""
-            // Never press the root window, application, or scroll area container itself
+            // Never press generic layout containers or root windows
             if role == "AXWindow" || role == "AXApplication" || role == "AXScrollArea" || role == "AXWebArea" {
                 break
             }
-            let actions = copyActionNames(el)
-            if actions.contains(kAXPressAction as String) || interactiveRoles.contains(role) {
+            if interactiveRoles.contains(role) {
                 if role != "AXRadioButton" && subrole != "AXTabButton" {
                     _ = AXUIElementSetAttributeValue(el, kAXFocusedAttribute as CFString, kCFBooleanTrue)
                 }
@@ -103,15 +118,6 @@ public final class AXScanner: @unchecked Sendable {
                 }
             }
             current = copyAttribute(el, kAXParentAttribute as String)
-        }
-
-        // Last resort: try pressing the immediate hit element directly
-        let startRole = copyStringAttribute(startEl, kAXRoleAttribute as String) ?? ""
-        if startRole != "AXWindow" && startRole != "AXApplication" && startRole != "AXWebArea" && startRole != "AXScrollArea" {
-            _ = AXUIElementSetAttributeValue(startEl, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            if AXUIElementPerformAction(startEl, kAXPressAction as CFString) == .success {
-                return startRole
-            }
         }
         return nil
     }
@@ -152,6 +158,21 @@ public final class AXScanner: @unchecked Sendable {
         submit: Bool = false
     ) -> Bool {
         guard pid > 0 else { return false }
+
+        if let snap = ElementSnapshotStore.shared.currentSnapshot(), snap.activePid == pid {
+            let textRoles: Set<String> = ["textfield", "textarea", "searchfield", "combobox"]
+            let candidates = snap.elements.filter { el in
+                el.source == .ax &&
+                textRoles.contains(el.role) &&
+                point.x >= el.frame.x - 4 && point.x <= el.frame.x + el.frame.width + 4 &&
+                point.y >= el.frame.y - 4 && point.y <= el.frame.y + el.frame.height + 4
+            }.sorted { ($0.frame.width * $0.frame.height) < ($1.frame.width * $1.frame.height) }
+
+            if let best = candidates.first, performNativeSetValue(ref: best.ref, value: value, submit: submit) {
+                return true
+            }
+        }
+
         let axApp = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(axApp, 0.6)
         var hitRef: AXUIElement?
@@ -278,7 +299,8 @@ public final class AXScanner: @unchecked Sendable {
         preferredWindowID: UInt32? = nil,
         windowTitleFilter: String? = nil,
         maxDepth: Int = 36,
-        maxElements: Int = 320
+        maxElements: Int = 320,
+        updateLiveMap: Bool = true
     ) -> (
         appName: String,
         pid: Int32,
@@ -545,9 +567,11 @@ public final class AXScanner: @unchecked Sendable {
             newMap[refId] = pair.1
         }
 
-        lock.lock()
-        liveElementMap = newMap
-        lock.unlock()
+        if updateLiveMap {
+            lock.lock()
+            liveElementMap = newMap
+            lock.unlock()
+        }
 
         return (appName, pid, resolvedWindowID, windowTitle, primaryWindowFrame, indexedElements, newMap)
     }

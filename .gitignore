@@ -8,3 +8,4 @@ dist/
 *.tgz
 *.zip
 *.sock
+local-e2e-tests/

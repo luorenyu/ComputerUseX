@@ -372,7 +372,8 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             appNameFilter: targetAppName,
             preferredWindowID: prevSnap?.windowID,
             maxDepth: 28,
-            maxElements: 200
+            maxElements: 200,
+            updateLiveMap: false
         )
         guard axScan.pid > 0 else { return nil }
 
@@ -410,22 +411,9 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             }
         }
 
-        // Preserve existing OCR elements if they belong to the same window so @e refs stay usable
-        let preservedOCR = (prevSnap?.activePid == axScan.pid) ? (prevSnap?.elements.filter { $0.source == .ocr } ?? []) : []
-        let merged = VisionOCRScanner.mergeElements(axElements: axScan.elements, ocrCandidates: preservedOCR)
-        let updatedSnap = SnapshotResult(
-            activeApp: axScan.appName,
-            activePid: axScan.pid,
-            windowID: axScan.windowID,
-            windowTitle: axScan.windowTitle,
-            screenBounds: axScan.windowFrame ?? prevSnap?.screenBounds ?? PermissionManager.shared.mainScreenBounds(),
-            scaleFactor: prevSnap?.scaleFactor ?? 2.0,
-            axCount: axScan.elements.count,
-            ocrCount: preservedOCR.count,
-            elements: merged
-        )
-        saveSnapshot(updatedSnap)
-
+        // IMPORTANT: Do NOT overwrite `latestSnapshot` or `AXScanner.shared.liveElementMap` here!
+        // Keeping `@e1..@eN` stable across multi-step click/type sequences ensures that an Agent
+        // referencing multiple `@e` IDs from a single `cux snapshot` never hits shifted indices.
         return parts.isEmpty ? nil : parts.joined(separator: " | ")
     }
 

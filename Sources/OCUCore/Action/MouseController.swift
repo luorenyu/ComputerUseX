@@ -438,9 +438,11 @@ public final class MouseController: @unchecked Sendable {
             // For raw coordinates (e.g. click 2733 611) or OCR elements (@e102 [ocrText: 填写评价]) in virtual mode:
             // 1. Try position-based Accessibility hit-test press (`AXUIElementCopyElementAtPosition` -> `kAXPressAction`),
             //    which triggers Chromium/WebKit/Electron's native Blink `kDoDefault` click even in the background!
+            var nativeOrDomHandled = false
             if button == .left && clickCount == 1 && effPid > 0 {
                 if let axHitDesc = AXScanner.shared.performNativePressAtPosition(pid: effPid, point: targetPoint) {
                     detailParts.append("axHit=\(axHitDesc)")
+                    nativeOrDomHandled = true
                 } else if BrowserBridgeController.shared.isBrowserApp(effAppName, pid: effPid),
                           let domHit = BrowserBridgeController.shared.clickAtScreenPointOrLabel(
                               point: targetPoint,
@@ -449,20 +451,24 @@ public final class MouseController: @unchecked Sendable {
                               browser: effAppName
                           ) {
                     detailParts.append("domHit=\(domHit)")
+                    nativeOrDomHandled = true
                 }
             }
 
-            // 2. Also post process-targeted mouse events (`postToPid`) and focus the element at `targetPoint`
+            // 2. Focus the element at `targetPoint`, and only fall back to process-targeted synthesized mouse events (`postToPid`)
+            //    if neither native AX press nor Browser DOM click handled the action (preventing double-clicks or flipped-Y hits).
             if effPid > 0 {
                 AXScanner.shared.focusElementAtPosition(pid: effPid, point: targetPoint)
-                SyntheticFocusEnforcer.shared.performBackgroundClick(
-                    at: targetPoint,
-                    button: button,
-                    clickCount: clickCount,
-                    pid: effPid,
-                    windowID: effWid,
-                    windowBounds: effBounds
-                )
+                if !nativeOrDomHandled {
+                    SyntheticFocusEnforcer.shared.performBackgroundClick(
+                        at: targetPoint,
+                        button: button,
+                        clickCount: clickCount,
+                        pid: effPid,
+                        windowID: effWid,
+                        windowBounds: effBounds
+                    )
+                }
             }
 
             restoreUserFocusIfNeeded(effPid)
