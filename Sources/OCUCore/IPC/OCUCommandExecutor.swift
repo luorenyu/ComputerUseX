@@ -608,7 +608,10 @@ public final class OCUCommandExecutor: @unchecked Sendable {
 
     private func runHUDDemoShowcase() throws -> ActionOutcome {
         let startTime = Date()
-        let bounds = PermissionManager.shared.mainScreenBounds()
+        let activeDisplay = PermissionManager.shared.displayContaining(
+            point: PermissionManager.shared.currentMouseLocation()
+        )
+        let bounds = activeDisplay.bounds
         let center = bounds.center
         let p0 = ScreenPoint(x: center.x - 240, y: center.y + 80)
         let p1 = ScreenPoint(x: center.x - 170, y: center.y - 95)

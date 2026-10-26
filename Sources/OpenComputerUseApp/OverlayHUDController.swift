@@ -13,6 +13,7 @@ public struct RippleItem: Identifiable {
 
 public final class HUDViewModel: ObservableObject, @unchecked Sendable {
     @Published public var isHUDEnabled: Bool = true
+    @Published public var activeScreenID: CGDirectDisplayID = CGMainDisplayID()
     @Published public var showBorderGlow: Bool = false
     @Published public var pillTitle: String? = nil
     @Published public var pillSubtitle: String? = nil
@@ -29,6 +30,22 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
 
     public init() {}
 
+    public func updateActiveScreen(for point: ScreenPoint) {
+        let resolvedID = PermissionManager.shared.displayContaining(point: point).id
+        if self.activeScreenID != resolvedID {
+            self.activeScreenID = resolvedID
+        }
+    }
+
+    public func refreshFallbackActiveScreen() {
+        let pipVM = MiniPreviewWindowController.shared.viewModel
+        if pipVM.targetWindowID > 0 && pipVM.windowBounds.width > 10 && pipVM.windowBounds.height > 10 {
+            updateActiveScreen(for: pipVM.windowBounds.center)
+        } else {
+            updateActiveScreen(for: PermissionManager.shared.currentMouseLocation())
+        }
+    }
+
     private var isTargetInBackground: Bool {
         let pipVM = MiniPreviewWindowController.shared.viewModel
         guard pipVM.isEnabled, pipVM.targetWindowID > 0 else { return false }
@@ -44,6 +61,9 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
 
             switch event {
             case .pipTargetWindow(let pid, let windowID, let appName, let windowTitle, let windowBounds):
+                if windowBounds.width > 10 && windowBounds.height > 10 {
+                    self.updateActiveScreen(for: windowBounds.center)
+                }
                 MiniPreviewWindowController.shared.updateTargetWindow(
                     pid: pid,
                     windowID: windowID,
@@ -53,6 +73,9 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 )
 
             case .setActiveGlow(let active):
+                if active {
+                    self.refreshFallbackActiveScreen()
+                }
                 if self.isTargetInBackground {
                     self.showBorderGlow = false
                     return
@@ -76,6 +99,9 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 let cleanedTitle = GeminiPalette.cleanStatusText(title)
                 if cleanedTitle.contains("视觉引擎演示") {
                     MiniPreviewWindowController.shared.viewModel.targetWindowID = 0
+                    self.updateActiveScreen(for: PermissionManager.shared.currentMouseLocation())
+                } else {
+                    self.refreshFallbackActiveScreen()
                 }
                 MiniPreviewWindowController.shared.updateStatus(cleanedTitle)
                 if self.isTargetInBackground {
@@ -95,6 +121,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 self.trailPoints = []
 
             case .highlightElement(let rect, let label):
+                self.updateActiveScreen(for: rect.center)
                 MiniPreviewWindowController.shared.showHighlight(rect: rect, label: label)
                 if self.isTargetInBackground {
                     self.highlightRect = nil
@@ -116,6 +143,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
 
             case .clickRipple(let point, let button, let clickCount):
+                self.updateActiveScreen(for: point)
                 MiniPreviewWindowController.shared.addClickRipple(at: point)
                 if self.isTargetInBackground {
                     return
@@ -128,6 +156,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 self.scheduleAutoFade()
 
             case .virtualCursorMove(let point, let windowID, let pid, let tiltAngle, let label):
+                self.updateActiveScreen(for: point)
                 MiniPreviewWindowController.shared.updateCursor(
                     screenPoint: point,
                     windowID: windowID,
@@ -151,6 +180,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
 
             case .virtualCursorPress(let point, let windowID, let isPressed):
+                self.updateActiveScreen(for: point)
                 MiniPreviewWindowController.shared.updateCursorPressed(isPressed, screenPoint: point)
                 let effWid = windowID ?? MiniPreviewWindowController.shared.viewModel.targetWindowID
                 let effPid = MiniPreviewWindowController.shared.viewModel.targetPid
@@ -238,53 +268,88 @@ public final class OverlayHUDWindowController: @unchecked Sendable {
     public static let shared = OverlayHUDWindowController()
     public let viewModel = HUDViewModel()
     private var panels: [NSPanel] = []
+    private var screenObserverRegistered = false
 
     private init() {}
 
     public func setupOverlayWindow() {
         DispatchQueue.main.async {
-            guard self.panels.isEmpty else { return }
-            for screen in NSScreen.screens {
-                let screenNumber = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
-                let cgBounds = CGDisplayBounds(screenNumber)
-                let originOffset = ScreenPoint(x: Double(cgBounds.origin.x), y: Double(cgBounds.origin.y))
-
-                let overlayPanel = NSPanel(
-                    contentRect: screen.frame,
-                    styleMask: [.borderless, .nonactivatingPanel],
-                    backing: .buffered,
-                    defer: false
-                )
-                overlayPanel.isOpaque = false
-                overlayPanel.backgroundColor = .clear
-                overlayPanel.hasShadow = false
-                overlayPanel.ignoresMouseEvents = true
-                overlayPanel.level = .screenSaver
-                overlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-                overlayPanel.contentView = NSHostingView(
-                    rootView: OverlayHUDRootView(viewModel: self.viewModel, screenOrigin: originOffset)
-                )
-                overlayPanel.orderFrontRegardless()
-                self.panels.append(overlayPanel)
+            if !self.screenObserverRegistered {
+                self.screenObserverRegistered = true
+                NotificationCenter.default.addObserver(
+                    forName: NSApplication.didChangeScreenParametersNotification,
+                    object: nil,
+                    queue: .main
+                ) { [weak self] _ in
+                    self?.rebuildOverlayPanels()
+                }
             }
+            guard self.panels.isEmpty else { return }
+            self.rebuildOverlayPanels()
+        }
+    }
+
+    private func rebuildOverlayPanels() {
+        for p in self.panels {
+            p.orderOut(nil)
+            p.close()
+        }
+        self.panels.removeAll()
+
+        for screen in NSScreen.screens {
+            let screenNumber = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value ?? CGMainDisplayID()
+            let cgBounds = CGDisplayBounds(screenNumber)
+            let originOffset = ScreenPoint(x: Double(cgBounds.origin.x), y: Double(cgBounds.origin.y))
+
+            let overlayPanel = NSPanel(
+                contentRect: screen.frame,
+                styleMask: [.borderless, .nonactivatingPanel],
+                backing: .buffered,
+                defer: false
+            )
+            overlayPanel.isOpaque = false
+            overlayPanel.backgroundColor = .clear
+            overlayPanel.hasShadow = false
+            overlayPanel.ignoresMouseEvents = true
+            overlayPanel.level = .screenSaver
+            overlayPanel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+            overlayPanel.contentView = NSHostingView(
+                rootView: OverlayHUDRootView(
+                    viewModel: self.viewModel,
+                    screenID: screenNumber,
+                    screenOrigin: originOffset
+                )
+            )
+            overlayPanel.orderFrontRegardless()
+            self.panels.append(overlayPanel)
         }
     }
 }
 
 struct OverlayHUDRootView: View {
     @ObservedObject var viewModel: HUDViewModel
+    let screenID: CGDirectDisplayID
     let screenOrigin: ScreenPoint
 
-    init(viewModel: HUDViewModel, screenOrigin: ScreenPoint = ScreenPoint(x: 0, y: 0)) {
+    init(
+        viewModel: HUDViewModel,
+        screenID: CGDirectDisplayID = CGMainDisplayID(),
+        screenOrigin: ScreenPoint = ScreenPoint(x: 0, y: 0)
+    ) {
         self.viewModel = viewModel
+        self.screenID = screenID
         self.screenOrigin = screenOrigin
+    }
+
+    private var isCurrentActiveScreen: Bool {
+        viewModel.activeScreenID == screenID
     }
 
     var body: some View {
         GeometryReader { geo in
             ZStack(alignment: .topLeading) {
-                // 1. Screen Edge Gemini Live Aurora Halo Border (Multi-Layered Diffused Glow)
-                if viewModel.showBorderGlow {
+                // 1. Screen Edge Gemini Live Aurora Halo Border (Locked strictly to the currently active screen)
+                if viewModel.showBorderGlow && isCurrentActiveScreen {
                     ZStack {
                         // Outer Soft Diffused Aurora Bloom
                         RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -327,8 +392,8 @@ struct OverlayHUDRootView: View {
                     .transition(.opacity)
                 }
 
-                // 2. Target Element Highlight Frame (Gemini Aurora Frame with Soft Glow)
-                if let rect = viewModel.highlightRect {
+                // 2. Target Element Highlight Frame (Locked to the active screen)
+                if isCurrentActiveScreen, let rect = viewModel.highlightRect {
                     RoundedRectangle(cornerRadius: 7, style: .continuous)
                         .stroke(GeminiPalette.auroraGradient, lineWidth: 2.2)
                         .background(
@@ -344,17 +409,19 @@ struct OverlayHUDRootView: View {
                         )
                 }
 
-                // 4. Click Ripples
-                ForEach(viewModel.ripples) { ripple in
-                    ClickRippleView(ripple: ripple)
-                        .position(
-                            x: ripple.point.x - screenOrigin.x,
-                            y: ripple.point.y - screenOrigin.y
-                        )
+                // 4. Click Ripples (Locked to the active screen)
+                if isCurrentActiveScreen {
+                    ForEach(viewModel.ripples) { ripple in
+                        ClickRippleView(ripple: ripple)
+                            .position(
+                                x: ripple.point.x - screenOrigin.x,
+                                y: ripple.point.y - screenOrigin.y
+                            )
+                    }
                 }
 
-                // 5. Floating Bottom Gemini Live Status Capsule
-                if let title = viewModel.pillTitle {
+                // 5. Floating Bottom Gemini Live Status Capsule (Locked strictly to the currently active screen)
+                if isCurrentActiveScreen, let title = viewModel.pillTitle {
                     VStack {
                         Spacer()
                         ZStack {

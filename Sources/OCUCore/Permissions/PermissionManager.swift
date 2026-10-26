@@ -86,7 +86,10 @@ public final class PermissionManager: @unchecked Sendable {
         if let match = all.first(where: { $0.bounds.contains(point) }) {
             return match
         }
-        return all.first ?? (CGMainDisplayID(), mainScreenBounds(), mainScreenScaleFactor())
+        if let closest = all.min(by: { $0.bounds.center.distance(to: point) < $1.bounds.center.distance(to: point) }) {
+            return closest
+        }
+        return (CGMainDisplayID(), mainScreenBounds(), mainScreenScaleFactor())
     }
 
     public func mainScreenScaleFactor() -> Double {
