@@ -1,10 +1,10 @@
-# AGENTS.md — OpenComputerUse (`ocu`) Engineering & Workflow Guidelines
+# AGENTS.md — ComputerUseX (`cux`) Engineering & Workflow Guidelines
 
 ## 1. Project Overview
-**OpenComputerUse (`ocu`)** is a native macOS GUI automation and Computer Use engine built in Swift 6. It provides:
+**ComputerUseX (`cux`)** is a native desktop GUI automation and Computer Use engine built in Swift 6. It provides:
 - `OCUCore`: Shared framework for Tri-Modal Perception (`AXUIElement` + Apple `Vision` OCR + Set-of-Marks annotation), Bézier curve Mouse/Keyboard control, Safety Guardrails, and Unix Domain Socket IPC.
-- `ocu`: Fast CLI and standard Model Context Protocol (MCP) stdio server.
-- `OpenComputerUseApp`: Menu bar companion app (`OpenComputerUse.app`) with full-screen click-through visual HUD (border glow, pointer trail, click ripples, floating action pill) and TCC permission onboarding.
+- `cux`: Fast CLI and standard Model Context Protocol (MCP) stdio server.
+- `ComputerUseXApp`: Menu bar companion app (`ComputerUseX.app`) with full-screen click-through visual HUD (border glow, pointer trail, click ripples, floating action pill) and TCC permission onboarding.
 
 ## 2. Coding Standards
 - **Language**: Swift 6 (`swift-tools-version: 6.0`), targeting `macOS(.v14)`.
@@ -15,5 +15,5 @@
 ## 3. Build & Verification Workflow
 - Build all targets: `swift build`
 - Run unit tests: `swift test`
-- Run CLI diagnostics: `.build/debug/ocu doctor`
+- Run CLI diagnostics: `.build/debug/cux doctor`
 - Package `.app` bundle: `./scripts/build-app.sh`

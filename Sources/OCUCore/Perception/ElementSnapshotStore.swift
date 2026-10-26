@@ -13,7 +13,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
     public var cacheDirectory: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
-        let dir = home.appendingPathComponent(".opencomputeruse", isDirectory: true)
+        let dir = home.appendingPathComponent(".computerusex", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -291,7 +291,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         throw OCUError(
             code: .elementNotFound,
             message: "Could not find UI element matching '\(target)' in active window '\(freshSnapshot.activeApp)'.",
-            recoveryHint: "Call ocu_snapshot (with --ocr or --som) to inspect available @e1..@eN references."
+            recoveryHint: "Call cux_snapshot (with --ocr or --som) to inspect available @e1..@eN references."
         )
     }
 

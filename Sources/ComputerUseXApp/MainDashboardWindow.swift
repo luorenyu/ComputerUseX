@@ -146,7 +146,7 @@ public final class MainDashboardWindowController: @unchecked Sendable {
                     backing: .buffered,
                     defer: false
                 )
-                win.title = "OpenComputerUse — 电脑操控中心"
+                win.title = "ComputerUseX — 电脑操控中心"
                 win.titlebarAppearsTransparent = true
                 win.titleVisibility = .hidden
                 win.appearance = NSAppearance(named: .darkAqua)

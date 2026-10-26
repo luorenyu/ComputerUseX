@@ -25,7 +25,7 @@ struct OCUCLI {
             printHelp()
             return
         case "-v", "--version", "version":
-            print("ocu (OpenComputerUse) v\(version)")
+            print("cux (ComputerUseX) v\(version)")
             return
         case "mcp":
             MCPServer.shared.runStdioLoop()
@@ -450,7 +450,7 @@ struct OCUCLI {
 
         if let st = resp.status {
             print("╔══════════════════════════════════════════════════════════════╗")
-            print("║                OpenComputerUse (ocu) Status                  ║")
+            print("║                  ComputerUseX (cux) Status                   ║")
             print("╠══════════════════════════════════════════════════════════════╣")
             print("║ Accessibility Permission : \(st.accessibilityGranted ? "✅ Granted" : "⚠️  Not Granted (Required for AX/Click)")")
             print("║ Screen Record Permission : \(st.screenRecordingGranted ? "✅ Granted" : "⚠️  Not Granted (Required for OCR/SoM)")")
@@ -464,12 +464,12 @@ struct OCUCLI {
             if let locked = st.screenLocked {
                 print("║ Screen Lock State        : \(locked ? "🔒 Locked" : "🔓 Unlocked (Active Session)")")
             }
-            print("║ Kill Switch (Opt+Esc)    : \(st.killSwitchTripped ? "🛑 Tripped (Run 'ocu reset')" : "🟢 Armed & Safe")")
+            print("║ Kill Switch (Opt+Esc)    : \(st.killSwitchTripped ? "🛑 Tripped (Run 'cux reset')" : "🟢 Armed & Safe")")
             print("╚══════════════════════════════════════════════════════════════╝")
         }
 
         if let bills = resp.bills, !bills.isEmpty {
-            print("🧾 Recent OpenComputerUse Session Bills (\(bills.count)):")
+            print("🧾 Recent ComputerUseX Session Bills (\(bills.count)):")
             for b in bills {
                 print(" • [#\(b.billId)] \(b.endTime) | 🤖 \(b.agentName) (\(b.modelName)) | ⏱️ \(b.formattedDurationCompact) | 📊 \(b.totalTokens) tok | 💵 $\(String(format: "%.5f", b.costUSD))")
             }
@@ -554,27 +554,27 @@ struct OCUCLI {
             return
         }
 
-        print("🩺 OpenComputerUse (ocu) v\(version) System Diagnostics")
+        print("🩺 ComputerUseX (cux) v\(version) System Diagnostics")
         print("────────────────────────────────────────────────────────")
         print("1. [Permissions]")
         print("   • Accessibility (AXUIElement & CGEvent): \(st.accessibilityGranted ? "✅ Ready" : "⚠️  Not Granted (Open System Settings > Privacy > Accessibility)")")
         print("   • Screen Recording (OCR & SoM Capture) : \(st.screenRecordingGranted ? "✅ Ready" : "⚠️  Not Granted (Open System Settings > Privacy > Screen Recording)")")
         print("2. [Visual HUD Daemon]")
-        print("   • OpenComputerUse.app IPC Socket       : \(st.daemonConnected ? "✅ Connected (\(st.socketPath))" : "ℹ️  Not running (CLI/MCP will execute directly in standalone mode)")")
+        print("   • ComputerUseX.app IPC Socket          : \(st.daemonConnected ? "✅ Connected (\(st.socketPath))" : "ℹ️  Not running (CLI/MCP will execute directly in standalone mode)")")
         print("3. [Display & Workspace]")
         print("   • Main Display                         : \(Int(st.screenBounds.width))×\(Int(st.screenBounds.height)) logical pts (@\(Int(st.scaleFactor))x Retina)")
         print("   • Active GUI Applications              : \(appsCount) apps detected (frontmost: \(st.activeApp ?? "None"))")
         print("4. [MCP Server Readiness]")
-        print("   • Registered MCP Tools                 : ✅ \(toolsCount) tools ready (`ocu mcp`)")
+        print("   • Registered MCP Tools                 : ✅ \(toolsCount) tools ready (`cux mcp`)")
         print("────────────────────────────────────────────────────────")
     }
 
     static func printHelp() {
         print("""
-        OpenComputerUse (ocu) v\(version) — Product-Grade macOS Computer Use CLI & MCP Server
+        ComputerUseX (cux) v\(version) — Product-Grade Desktop Computer Use CLI & MCP Server
 
         USAGE:
-          ocu <command> [options]
+          cux <command> [options]
 
         CORE COMMANDS:
           status                              Show permissions, HUD daemon status, screen & cursor info

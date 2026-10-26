@@ -113,7 +113,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 continue
             }
             let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
-            if ownerName.lowercased().contains("opencomputeruse") { continue }
+            let lowerOwner = ownerName.lowercased()
+            if lowerOwner.contains("computerusex") || lowerOwner.contains("opencomputeruse") { continue }
             let rect = ScreenRect(
                 x: Double(boundsDict["X"] ?? 0),
                 y: Double(boundsDict["Y"] ?? 0),
@@ -144,7 +145,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 continue
             }
             let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
-            if ownerName.lowercased().contains("opencomputeruse") { continue }
+            let lowerOwner = ownerName.lowercased()
+            if lowerOwner.contains("computerusex") || lowerOwner.contains("opencomputeruse") { continue }
             let rect = ScreenRect(
                 x: Double(boundsDict["X"] ?? 0),
                 y: Double(boundsDict["Y"] ?? 0),
@@ -181,7 +183,8 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                 continue
             }
             let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
-            if ownerName.lowercased().contains("opencomputeruse") { continue }
+            let lowerOwner = ownerName.lowercased()
+            if lowerOwner.contains("computerusex") || lowerOwner.contains("opencomputeruse") { continue }
             let w = Double(boundsDict["Width"] ?? 0)
             let h = Double(boundsDict["Height"] ?? 0)
             guard w >= 80, h >= 80 else { continue }

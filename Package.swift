@@ -2,7 +2,7 @@
 import PackageDescription
 
 let package = Package(
-    name: "OpenComputerUse",
+    name: "ComputerUseX",
     platforms: [
         .macOS(.v14)
     ],
@@ -12,12 +12,12 @@ let package = Package(
             targets: ["OCUCore"]
         ),
         .executable(
-            name: "ocu",
-            targets: ["ocu"]
+            name: "cux",
+            targets: ["cux"]
         ),
         .executable(
-            name: "OpenComputerUseApp",
-            targets: ["OpenComputerUseApp"]
+            name: "ComputerUseXApp",
+            targets: ["ComputerUseXApp"]
         )
     ],
     targets: [
@@ -34,14 +34,14 @@ let package = Package(
             ]
         ),
         .executableTarget(
-            name: "ocu",
+            name: "cux",
             dependencies: ["OCUCore"],
-            path: "Sources/ocu"
+            path: "Sources/cux"
         ),
         .executableTarget(
-            name: "OpenComputerUseApp",
+            name: "ComputerUseXApp",
             dependencies: ["OCUCore"],
-            path: "Sources/OpenComputerUseApp",
+            path: "Sources/ComputerUseXApp",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("SwiftUI")

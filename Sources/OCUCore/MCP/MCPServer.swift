@@ -2,7 +2,7 @@ import Foundation
 
 public final class MCPServer: @unchecked Sendable {
     public static let shared = MCPServer()
-    public static let serverName = "open-computer-use"
+    public static let serverName = "computer-use-x"
     public static let serverVersion = "1.0.0"
 
     private init() {}
@@ -152,10 +152,11 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func buildIPCRequest(for toolName: String, arguments: [String: Any]) -> IPCRequest {
-        switch toolName {
-        case "ocu_status":
+        let normalized = toolName.replacingOccurrences(of: "ocu_", with: "cux_")
+        switch normalized {
+        case "cux_status":
             return IPCRequest(command: "status")
-        case "ocu_apps":
+        case "cux_apps":
             return IPCRequest(
                 command: "apps",
                 app: arguments["app"] as? String,
@@ -165,7 +166,7 @@ public final class MCPServer: @unchecked Sendable {
                 height: doubleVal(arguments["height"]),
                 launch: arguments["launch"] as? Bool ?? true
             )
-        case "ocu_snapshot":
+        case "cux_snapshot":
             let winID = intVal(arguments["window_id"]).map { UInt32($0) }
             return IPCRequest(
                 command: "snapshot",
@@ -182,7 +183,7 @@ public final class MCPServer: @unchecked Sendable {
                 agentName: arguments["agent"] as? String,
                 modelName: arguments["model"] as? String
             )
-        case "ocu_browser":
+        case "cux_browser":
             return IPCRequest(
                 command: "browser",
                 app: arguments["browser"] as? String,
@@ -192,13 +193,13 @@ public final class MCPServer: @unchecked Sendable {
                 text: (arguments["url"] as? String) ?? (arguments["js"] as? String) ?? (arguments["selector"] as? String),
                 launch: arguments["new_tab"] as? Bool ?? false
             )
-        case "ocu_sandbox":
+        case "cux_sandbox":
             return IPCRequest(
                 command: "sandbox",
                 app: arguments["app"] as? String,
                 role: arguments["action"] as? String ?? "status"
             )
-        case "ocu_bill":
+        case "cux_bill":
             return IPCRequest(
                 command: "bill",
                 submit: arguments["finish"] as? Bool ?? false,
@@ -206,7 +207,7 @@ public final class MCPServer: @unchecked Sendable {
                 agentName: arguments["agent"] as? String,
                 modelName: arguments["model"] as? String
             )
-        case "ocu_query":
+        case "cux_query":
             let winID = intVal(arguments["window_id"]).map { UInt32($0) }
             return IPCRequest(
                 command: "query",
@@ -218,20 +219,20 @@ public final class MCPServer: @unchecked Sendable {
                 ocr: arguments["ocr"] as? Bool ?? true,
                 compact: arguments["compact"] as? Bool ?? true
             )
-        case "ocu_upload_file":
+        case "cux_upload_file":
             return IPCRequest(
                 command: "upload_file",
                 app: arguments["app"] as? String,
                 text: arguments["path"] as? String ?? "",
                 outputPath: arguments["path"] as? String
             )
-        case "ocu_secondary_action":
+        case "cux_secondary_action":
             return IPCRequest(
                 command: "secondary_action",
                 target: arguments["target"] as? String,
                 text: arguments["action"] as? String ?? "AXShowMenu"
             )
-        case "ocu_click":
+        case "cux_click":
             let btnStr = (arguments["button"] as? String)?.lowercased() ?? "left"
             return IPCRequest(
                 command: "click",
@@ -244,7 +245,7 @@ public final class MCPServer: @unchecked Sendable {
                 clickCount: intVal(arguments["count"]) ?? 1,
                 axNative: arguments["ax_native"] as? Bool ?? false
             )
-        case "ocu_move":
+        case "cux_move":
             return IPCRequest(
                 command: "move",
                 target: arguments["target"] as? String,
@@ -253,7 +254,7 @@ public final class MCPServer: @unchecked Sendable {
                 dx: doubleVal(arguments["dx"]),
                 dy: doubleVal(arguments["dy"])
             )
-        case "ocu_type":
+        case "cux_type":
             return IPCRequest(
                 command: "type",
                 target: arguments["target"] as? String,
@@ -265,20 +266,20 @@ public final class MCPServer: @unchecked Sendable {
                 submit: arguments["submit"] as? Bool ?? false,
                 clearFirst: arguments["clear"] as? Bool ?? false
             )
-        case "ocu_batch":
+        case "cux_batch":
             let rawSteps = arguments["steps"] as? [[String: Any]] ?? []
             let parsedSteps = rawSteps.map { stepDict -> IPCRequest in
                 let rawCmd = (stepDict["command"] as? String) ?? (stepDict["tool"] as? String) ?? "click"
-                let normalizedTool = rawCmd.hasPrefix("ocu_") ? rawCmd : "ocu_\(rawCmd)"
-                return buildIPCRequest(for: normalizedTool, arguments: stepDict)
+                let stripped = rawCmd.replacingOccurrences(of: "cux_", with: "").replacingOccurrences(of: "ocu_", with: "")
+                return buildIPCRequest(for: "cux_\(stripped)", arguments: stepDict)
             }
             return IPCRequest(command: "batch", steps: parsedSteps)
-        case "ocu_press":
+        case "cux_press":
             return IPCRequest(
                 command: "press",
                 keys: arguments["keys"] as? String ?? ""
             )
-        case "ocu_scroll":
+        case "cux_scroll":
             return IPCRequest(
                 command: "scroll",
                 target: arguments["target"] as? String,
@@ -287,7 +288,7 @@ public final class MCPServer: @unchecked Sendable {
                 dx: doubleVal(arguments["dx"]) ?? 0,
                 dy: doubleVal(arguments["dy"]) ?? -240
             )
-        case "ocu_drag":
+        case "cux_drag":
             return IPCRequest(
                 command: "drag",
                 target: arguments["from"] as? String,
@@ -298,7 +299,7 @@ public final class MCPServer: @unchecked Sendable {
                 toY: doubleVal(arguments["to_y"]),
                 timeout: doubleVal(arguments["duration"])
             )
-        case "ocu_wait":
+        case "cux_wait":
             return IPCRequest(
                 command: "wait",
                 text: arguments["text"] as? String,
@@ -354,7 +355,7 @@ public final class MCPServer: @unchecked Sendable {
     public static func toolDefinitions() -> [[String: Any]] {
         [
             [
-                "name": "ocu_status",
+                "name": "cux_status",
                 "description": "Check macOS Accessibility & Screen Recording permissions, daemon HUD connection status, screen bounds, and active app.",
                 "inputSchema": [
                     "type": "object",
@@ -362,7 +363,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_apps",
+                "name": "cux_apps",
                 "description": "List running macOS GUI apps and their windows, or focus/launch/resize a specific app.",
                 "inputSchema": [
                     "type": "object",
@@ -377,7 +378,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_snapshot",
+                "name": "cux_snapshot",
                 "description": "Inspect the active macOS application using Tri-Modal Grounding (AXUIElement tree + Apple Vision OCR + Set-of-Marks annotated screenshot). Returns interactive elements with @e1, @e2 references and exact screen coordinates.",
                 "inputSchema": [
                     "type": "object",
@@ -395,7 +396,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_query",
+                "name": "cux_query",
                 "description": "Fast, targeted query for UI elements matching a role (e.g. 'button', 'textField') and/or text substring without returning the entire window snapshot.",
                 "inputSchema": [
                     "type": "object",
@@ -410,7 +411,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_upload_file",
+                "name": "cux_upload_file",
                 "description": "Select and submit a local file path inside an open macOS NSOpenPanel / File Picker dialog using Cmd+Shift+G path navigation.",
                 "inputSchema": [
                     "type": "object",
@@ -422,7 +423,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_secondary_action",
+                "name": "cux_secondary_action",
                 "description": "Perform an Accessibility secondary action on an @eX element such as 'AXShowMenu' (context menu), 'AXIncrement', 'AXDecrement', 'AXConfirm', or 'AXCancel'.",
                 "inputSchema": [
                     "type": "object",
@@ -434,7 +435,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_click",
+                "name": "cux_click",
                 "description": "Click a UI element by reference (@e1), fuzzy label text, or screen (x, y) coordinates with optional relative offset (dx, dy), smooth Bézier cursor trajectory, and visual HUD ripple.",
                 "inputSchema": [
                     "type": "object",
@@ -451,7 +452,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_move",
+                "name": "cux_move",
                 "description": "Smoothly move the mouse cursor to an element (@e1) or (x, y) coordinate (with optional dx, dy offset) along a human-like Bézier curve.",
                 "inputSchema": [
                     "type": "object",
@@ -465,7 +466,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_type",
+                "name": "cux_type",
                 "description": "Type text (English, Chinese, Emoji, or multi-line) into the focused field, a target element (@e1), a relative offset from @e1 (dx, dy), or (x, y) coordinates. Uses safe clipboard transaction to prevent IME garbling.",
                 "inputSchema": [
                     "type": "object",
@@ -483,7 +484,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_batch",
+                "name": "cux_batch",
                 "description": "Execute a sequence of UI actions (click, type, press, wait, snapshot) in a single atomic round-trip to minimize LLM turns and latency.",
                 "inputSchema": [
                     "type": "object",
@@ -498,7 +499,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_press",
+                "name": "cux_press",
                 "description": "Press a keyboard key or shortcut combination such as 'enter', 'escape', 'tab', 'cmd+c', 'cmd+shift+p', 'opt+space'.",
                 "inputSchema": [
                     "type": "object",
@@ -509,7 +510,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_scroll",
+                "name": "cux_scroll",
                 "description": "Scroll smoothly by pixel delta (dx, dy) at current mouse position or over a target element (@e1).",
                 "inputSchema": [
                     "type": "object",
@@ -523,7 +524,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_drag",
+                "name": "cux_drag",
                 "description": "Smoothly drag from one element/coordinate to another element/coordinate.",
                 "inputSchema": [
                     "type": "object",
@@ -539,7 +540,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_wait",
+                "name": "cux_wait",
                 "description": "Wait for specified text/element to appear on screen (via AX + OCR polling) or wait for a fixed duration.",
                 "inputSchema": [
                     "type": "object",
@@ -550,7 +551,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_browser",
+                "name": "cux_browser",
                 "description": "Zero-focus background browser DOM/JS bridge for Google Chrome, Arc, Edge, Brave, and Safari. List open tabs, navigate URLs, evaluate JavaScript, extract DOM elements, or click CSS selectors without activating the browser window.",
                 "inputSchema": [
                     "type": "object",
@@ -566,7 +567,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_sandbox",
+                "name": "cux_sandbox",
                 "description": "Manage the Ghost Space peripheral window sandbox ('park' moves a target app window out of the user's central workspace while keeping its GPU surface live for PiP; 'restore' returns it to its original frame; 'status' checks screen lock and parked windows).",
                 "inputSchema": [
                     "type": "object",
@@ -577,7 +578,7 @@ public final class MCPServer: @unchecked Sendable {
                 ]
             ],
             [
-                "name": "ocu_bill",
+                "name": "cux_bill",
                 "description": "View or finalize the current ComputerUse session usage bill (shows Operator Agent, Model, Duration, Input/Output/Vision/Saved Tokens, and Cost in USD) and optionally pop up the visual receipt card on screen.",
                 "inputSchema": [
                     "type": "object",

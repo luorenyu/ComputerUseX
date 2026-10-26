@@ -392,7 +392,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     throw OCUError(
                         code: .actionFailed,
                         message: "Secondary action '\(actionName)' failed on \(el.ref) [\(el.label)].",
-                        recoveryHint: "Try right-clicking via 'ocu click --target \(el.ref) --right'."
+                        recoveryHint: "Try right-clicking via 'cux click --target \(el.ref) --right'."
                     )
                 }
                 let outcome = ActionOutcome(
@@ -517,7 +517,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     ok: true,
                     outcome: ActionOutcome(
                         action: "dashboard",
-                        targetDescription: "Opened OpenComputerUse Main Control Center Window (\(secToken))",
+                        targetDescription: "Opened ComputerUseX Main Control Center Window (\(secToken))",
                         elapsedMs: 5
                     )
                 )
@@ -600,7 +600,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
             let wrapped = OCUError(
                 code: .actionFailed,
                 message: error.localizedDescription,
-                recoveryHint: "Run 'ocu doctor' to verify permissions and system health."
+                recoveryHint: "Run 'cux doctor' to verify permissions and system health."
             )
             return IPCResponse(id: request.id, ok: false, error: wrapped)
         }
@@ -620,7 +620,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
 
         KillSwitchMonitor.shared.reset()
         KillSwitchMonitor.shared.emitHUDEvent(
-            .statusPill(title: "OpenComputerUse 视觉引擎演示", subtitle: "Gemini 极光光晕 + 统一流光指针 + 贝塞尔平滑轨迹")
+            .statusPill(title: "ComputerUseX 视觉引擎演示", subtitle: "Gemini 极光光晕 + 统一流光指针 + 贝塞尔平滑轨迹")
         )
         KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
 

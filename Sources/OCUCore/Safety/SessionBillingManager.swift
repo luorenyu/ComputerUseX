@@ -158,7 +158,7 @@ public struct UsageSessionBill: Codable, Equatable, Sendable, Identifiable {
         let cnyEstimate = costUSD * 7.20
         var lines: [String] = []
         lines.append("╔══════════════════════════════════════════════════════════════════╗")
-        lines.append("║                 🧾 OpenComputerUse 使用账单明细                  ║")
+        lines.append("║                   🧾 ComputerUseX 使用账单明细                    ║")
         lines.append("╠══════════════════════════════════════════════════════════════════╣")
         lines.append("║ 账单编号 (Bill ID)   : #\(billId) (\(endTime))")
         lines.append("║ 操作主体 (Agent)     : 🤖 \(agentName)")

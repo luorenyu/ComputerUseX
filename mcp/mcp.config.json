@@ -1,7 +1,7 @@
 {
   "mcpServers": {
-    "open-computer-use": {
-      "command": "/Applications/OpenComputerUse.app/Contents/MacOS/ocu",
+    "computer-use-x": {
+      "command": "/Applications/ComputerUseX.app/Contents/MacOS/cux",
       "args": ["mcp"]
     }
   }

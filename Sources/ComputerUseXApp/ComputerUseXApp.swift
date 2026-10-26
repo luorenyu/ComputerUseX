@@ -68,7 +68,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     public func resetAndPromptAccessibility() {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        proc.arguments = ["reset", "Accessibility", "org.opencomputeruse.app"]
+        proc.arguments = ["reset", "Accessibility", "org.computerusex.app"]
         try? proc.run()
         proc.waitUntilExit()
 
@@ -82,7 +82,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
     public func resetAndPromptScreenRecording() {
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
-        proc.arguments = ["reset", "ScreenCapture", "org.opencomputeruse.app"]
+        proc.arguments = ["reset", "ScreenCapture", "org.computerusex.app"]
         try? proc.run()
         proc.waitUntilExit()
 
@@ -110,14 +110,14 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
 
     public func copyMCPConfigToClipboard() {
         let binaryPath = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/MacOS/ocu").path
-        let fallbackPath = FileManager.default.currentDirectoryPath + "/.build/release/ocu"
+            .appendingPathComponent("Contents/MacOS/cux").path
+        let fallbackPath = FileManager.default.currentDirectoryPath + "/.build/release/cux"
         let resolvedPath = FileManager.default.fileExists(atPath: binaryPath) ? binaryPath : fallbackPath
 
         let config = """
         {
           "mcpServers": {
-            "open-computer-use": {
+            "computer-use-x": {
               "command": "\(resolvedPath)",
               "args": ["mcp"]
             }
@@ -133,7 +133,7 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
 }
 
 @main
-struct OpenComputerUseMenuBarApp: App {
+struct ComputerUseXMenuBarApp: App {
     init() {
         DispatchQueue.main.async {
             NSApplication.shared.setActivationPolicy(.accessory)
@@ -193,7 +193,7 @@ public final class StatusBarPopoverController: NSObject, @unchecked Sendable {
         DispatchQueue.main.async {
             if let button = self.statusItem?.button {
                 if killSwitchTripped {
-                    button.image = NSImage(systemSymbolName: "exclamationmark.octagon.fill", accessibilityDescription: "OpenComputerUse")
+                    button.image = NSImage(systemSymbolName: "exclamationmark.octagon.fill", accessibilityDescription: "ComputerUseX")
                     button.image?.isTemplate = true
                 } else {
                     button.image = GeminiBrandIconRenderer.statusBarImage(pointSize: 18)
@@ -256,7 +256,7 @@ private struct MenuBarPopupContentView: View {
                 // 1. Header Bar
                 HStack(spacing: 8) {
                     GeminiSparkleIcon(size: 16, showHalo: true)
-                    Text("OpenComputerUse")
+                    Text("ComputerUseX")
                         .font(.system(size: 14, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
                     Spacer()

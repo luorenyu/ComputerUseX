@@ -3,17 +3,17 @@ import Darwin
 
 public final class UnixSocketIPC: @unchecked Sendable {
     public static var defaultSocketPath: String {
-        "/tmp/ocu-\(getuid()).sock"
+        "/tmp/cux-\(getuid()).sock"
     }
 
     private var serverSocketFD: Int32 = -1
     private var isRunning = false
-    private let acceptQueue = DispatchQueue(label: "org.opencomputeruse.ipc.accept", qos: .userInteractive)
-    private let clientQueue = DispatchQueue(label: "org.opencomputeruse.ipc.client", qos: .userInteractive, attributes: .concurrent)
+    private let acceptQueue = DispatchQueue(label: "org.computerusex.ipc.accept", qos: .userInteractive)
+    private let clientQueue = DispatchQueue(label: "org.computerusex.ipc.client", qos: .userInteractive, attributes: .concurrent)
 
     public init() {}
 
-    // MARK: - Daemon Socket Server (Runs inside OpenComputerUse.app)
+    // MARK: - Daemon Socket Server (Runs inside ComputerUseX.app)
 
     public func startServer(socketPath: String = UnixSocketIPC.defaultSocketPath) throws {
         stopServer(socketPath: socketPath)
@@ -142,7 +142,7 @@ public final class UnixSocketIPC: @unchecked Sendable {
                 error: OCUError(
                     code: .invalidArguments,
                     message: "Failed to decode IPCRequest JSON.",
-                    recoveryHint: "Ensure CLI and OpenComputerUse.app versions match."
+                    recoveryHint: "Ensure CLI and ComputerUseX.app versions match."
                 )
             )
         }
@@ -217,7 +217,7 @@ public final class UnixSocketIPC: @unchecked Sendable {
             throw OCUError(
                 code: .ipcError,
                 message: "Daemon socket not connected at \(socketPath).",
-                recoveryHint: "Launch OpenComputerUse.app or run in direct mode."
+                recoveryHint: "Launch ComputerUseX.app or run in direct mode."
             )
         }
 

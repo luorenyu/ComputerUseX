@@ -86,7 +86,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
 
     public var baseDirectory: URL {
         let dir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".opencomputeruse", isDirectory: true)
+            .appendingPathComponent(".computerusex", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
     }
@@ -142,8 +142,8 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
         }) {
             throw OCUError(
                 code: .blockedApp,
-                message: "Access to sensitive application '\(name)' is blocked by OpenComputerUse security guardrail.",
-                recoveryHint: "Add '\(name)' to 'allowedApps' in ~/.opencomputeruse/config.json if you explicitly want to automate it."
+                message: "Access to sensitive application '\(name)' is blocked by ComputerUseX security guardrail.",
+                recoveryHint: "Add '\(name)' to 'allowedApps' in ~/.computerusex/config.json if you explicitly want to automate it."
             )
         }
 
@@ -157,8 +157,8 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             if alreadyDenied {
                 throw OCUError(
                     code: .blockedApp,
-                    message: "User denied OpenComputerUse access to application '\(name)' for this session.",
-                    recoveryHint: "Run 'ocu allow-app \"\(name)\"' to grant access."
+                    message: "User denied ComputerUseX access to application '\(name)' for this session.",
+                    recoveryHint: "Run 'cux allow-app \"\(name)\"' to grant access."
                 )
             }
 
@@ -173,7 +173,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
                     throw OCUError(
                         code: .blockedApp,
                         message: "User declined interactive permission to operate '\(name)'.",
-                        recoveryHint: "Approve the prompt or run 'ocu allow-app \"\(name)\"'."
+                        recoveryHint: "Approve the prompt or run 'cux allow-app \"\(name)\"'."
                     )
                 }
             }
@@ -266,7 +266,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             使用模型: \(modelName)
             目标应用: \(appName)
 
-            是否允许该 Agent 通过 OpenComputerUse 扫描并操作「\(appName)」？
+            是否允许该 Agent 通过 ComputerUseX 扫描并操作「\(appName)」？
             """
             alert.addButton(withTitle: "允许并加入白名单 (Always Allow)")
             alert.addButton(withTitle: "仅本次会话允许 (Allow Once)")
@@ -342,9 +342,9 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
     public func installMCPConfiguration(target: String = "all", binaryPath: String? = nil) throws -> ActionOutcome {
         let resolvedBin: String = {
             if let custom = binaryPath, !custom.isEmpty { return custom }
-            let appBin = "/Applications/OpenComputerUse.app/Contents/MacOS/ocu"
+            let appBin = "/Applications/ComputerUseX.app/Contents/MacOS/cux"
             if FileManager.default.fileExists(atPath: appBin) { return appBin }
-            let localBin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/ocu").path
+            let localBin = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/cux").path
             if FileManager.default.fileExists(atPath: localBin) { return localBin }
             return CommandLine.arguments.first ?? localBin
         }()
@@ -364,7 +364,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
                 root = obj
             }
             var mcpServers = (root["mcpServers"] as? [String: Any]) ?? [:]
-            mcpServers["open-computer-use"] = [
+            mcpServers["computer-use-x"] = [
                 "command": resolvedBin,
                 "args": ["mcp"]
             ]
@@ -390,7 +390,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
                 withIntermediateDirectories: true
             )
             var toml = (try? String(contentsOf: codexURL, encoding: .utf8)) ?? ""
-            let sectionHeader = "[mcp_servers.open_computer_use]"
+            let sectionHeader = "[mcp_servers.computer_use_x]"
             let block = """
             \(sectionHeader)
             command = "\(resolvedBin)"
@@ -406,7 +406,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
 
         return ActionOutcome(
             action: "install_mcp",
-            targetDescription: "Installed open-computer-use MCP to \(updatedPaths.count) config(s)",
+            targetDescription: "Installed computer-use-x MCP to \(updatedPaths.count) config(s)",
             details: updatedPaths.joined(separator: ", "),
             elapsedMs: 5
         )

@@ -38,7 +38,7 @@ public final class ScreenCaptureService: @unchecked Sendable {
         let allDisplays = PermissionManager.shared.allDisplayBounds()
         let displayIndex = (allDisplays.firstIndex(where: { $0.id == displayInfo.id }) ?? 0) + 1
         let tempURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ocu-raw-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(6)).png")
+            .appendingPathComponent("cux-raw-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString.prefix(6)).png")
         defer {
             try? FileManager.default.removeItem(at: tempURL)
         }
@@ -132,7 +132,9 @@ public final class ScreenCaptureService: @unchecked Sendable {
             // capture the display containing scWin and crop strictly to winRect (single window only!)
             if let scDisplay = content.displays.first(where: { ScreenRect($0.frame).intersectionArea(with: winRect) > 0 }) ?? content.displays.first {
                 let displayRect = ScreenRect(scDisplay.frame)
-                let excludedApps = content.applications.filter { $0.bundleIdentifier == "org.opencomputeruse.app" }
+                let excludedApps = content.applications.filter {
+                    $0.bundleIdentifier == "org.computerusex.app" || $0.bundleIdentifier == "org.opencomputeruse.app"
+                }
                 let dispFilter = SCContentFilter(display: scDisplay, excludingApplications: excludedApps, exceptingWindows: [])
                 let dispConfig = SCStreamConfiguration()
                 dispConfig.width = scDisplay.width
@@ -240,9 +242,9 @@ public final class ScreenCaptureService: @unchecked Sendable {
                 let displayRect = ScreenRect(scDisplay.frame)
                 resolvedBounds = displayRect
 
-                // Exclude OpenComputerUse's own HUD overlay from screenshots
+                // Exclude ComputerUseX's own HUD overlay from screenshots
                 let excludedApps = content.applications.filter {
-                    $0.bundleIdentifier == "org.opencomputeruse.app"
+                    $0.bundleIdentifier == "org.computerusex.app" || $0.bundleIdentifier == "org.opencomputeruse.app"
                 }
                 let filter = SCContentFilter(
                     display: scDisplay,

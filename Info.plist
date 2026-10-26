@@ -5,15 +5,15 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>OpenComputerUseApp</string>
+    <string>ComputerUseXApp</string>
     <key>CFBundleIdentifier</key>
-    <string>org.opencomputeruse.app</string>
+    <string>org.computerusex.app</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>OpenComputerUse</string>
+    <string>ComputerUseX</string>
     <key>CFBundleDisplayName</key>
-    <string>OpenComputerUse</string>
+    <string>ComputerUseX</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -29,8 +29,8 @@
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSAccessibilityUsageDescription</key>
-    <string>OpenComputerUse needs Accessibility access to inspect UI trees and control the mouse and keyboard on behalf of AI agents.</string>
+    <string>ComputerUseX needs Accessibility access to inspect UI trees and control the mouse and keyboard on behalf of AI agents.</string>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>OpenComputerUse needs Screen Recording access to run Apple Vision OCR and render Set-of-Marks (SoM) annotated screenshots.</string>
+    <string>ComputerUseX needs Screen Recording access to run Apple Vision OCR and render Set-of-Marks (SoM) annotated screenshots.</string>
 </dict>
 </plist>

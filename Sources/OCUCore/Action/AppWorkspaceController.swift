@@ -208,7 +208,7 @@ public final class AppWorkspaceController: @unchecked Sendable {
         throw OCUError(
             code: .timeout,
             message: "Timed out after \(timeoutSeconds)s waiting for text '\(query)' on screen.",
-            recoveryHint: "Take an ocu_snapshot to inspect the current UI state."
+            recoveryHint: "Take a cux_snapshot to inspect the current UI state."
         )
     }
 

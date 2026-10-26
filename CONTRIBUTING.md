@@ -1,6 +1,6 @@
-# Contributing to OpenComputerUse (`ocu`)
+# Contributing to ComputerUseX (`cux`)
 
-Thank you for your interest in contributing to **OpenComputerUse**!
+Thank you for your interest in contributing to **ComputerUseX**!
 
 ## 🎯 Design Philosophy & Constraints
 
@@ -25,18 +25,18 @@ Thank you for your interest in contributing to **OpenComputerUse**!
 # Run the unit test suite
 swift test
 
-# Build release app bundle (dist/OpenComputerUse.app) and CLI/MCP binary (dist/ocu)
+# Build release app bundle (dist/ComputerUseX.app) and CLI/MCP binary (dist/cux)
 ./scripts/build-app.sh
 
-# Install to /Applications/OpenComputerUse.app and ~/.local/bin/ocu
+# Install to /Applications/ComputerUseX.app and ~/.local/bin/cux
 ./scripts/install.sh
 ```
 
 ### Verify Diagnostics & Visual HUD
 ```bash
-ocu doctor
-ocu dashboard
-ocu hud-demo
+cux doctor
+cux dashboard
+cux hud-demo
 ```
 
 ---

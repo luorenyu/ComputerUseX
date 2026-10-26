@@ -138,7 +138,7 @@ final class OCUCoreTests: XCTestCase {
     }
 
     func testUnixSocketIPCRoundTrip() throws {
-        let socketPath = "/tmp/ocu-test-\(UUID().uuidString.prefix(8)).sock"
+        let socketPath = "/tmp/cux-test-\(UUID().uuidString.prefix(8)).sock"
         let server = UnixSocketIPC()
         try server.startServer(socketPath: socketPath)
         defer {
@@ -167,7 +167,7 @@ final class OCUCoreTests: XCTestCase {
             XCTFail("Invalid MCP initialize response")
             return
         }
-        XCTAssertEqual(serverInfo["name"] as? String, "open-computer-use")
+        XCTAssertEqual(serverInfo["name"] as? String, "computer-use-x")
 
         let listReq = """
         {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
@@ -181,15 +181,15 @@ final class OCUCoreTests: XCTestCase {
             return
         }
         XCTAssertEqual(tools.count, 17)
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_snapshot" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_query" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_upload_file" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_secondary_action" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_browser" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_sandbox" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_bill" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_click" }))
-        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "ocu_batch" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_snapshot" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_query" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_upload_file" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_secondary_action" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_browser" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_sandbox" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_bill" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_click" }))
+        XCTAssertTrue(tools.contains(where: { ($0["name"] as? String) == "cux_batch" }))
     }
 
     func testPerceptualImageDHashAndSessionBilling() {
@@ -242,7 +242,7 @@ final class OCUCoreTests: XCTestCase {
         XCTAssertEqual(finalized?.modelName, "Gemini 4 Argon Medium")
         XCTAssertGreaterThan(finalized?.totalTokens ?? 0, 100)
         XCTAssertGreaterThan(finalized?.costUSD ?? 0, 0.0)
-        XCTAssertTrue(finalized?.formatReceiptText().contains("OpenComputerUse 使用账单明细") == true)
+        XCTAssertTrue(finalized?.formatReceiptText().contains("ComputerUseX 使用账单明细") == true)
     }
 
     func testSecurityGuardBlocksSensitiveAppsAndRecordsAudit() {

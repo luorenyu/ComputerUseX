@@ -63,7 +63,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
     private var captureTimer: Timer?
     private var autoHideWorkItem: DispatchWorkItem?
     private var thinkingStatusWorkItem: DispatchWorkItem?
-    private let captureQueue = DispatchQueue(label: "org.opencomputeruse.pip.capture", qos: .userInteractive)
+    private let captureQueue = DispatchQueue(label: "org.computerusex.pip.capture", qos: .userInteractive)
     private var isCapturingFrame = false
 
     private let maxPanelEdge: Double = 300.0
@@ -158,7 +158,8 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
         windowBounds: ScreenRect
     ) {
         guard viewModel.isEnabled, windowID > 0 else { return }
-        if appName.lowercased().contains("opencomputeruse") { return }
+        let lowerApp = appName.lowercased()
+        if lowerApp.contains("computerusex") || lowerApp.contains("opencomputeruse") { return }
         DispatchQueue.main.async {
             self.ensureWindowCreated()
             self.viewModel.targetPid = pid

@@ -3,12 +3,12 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${ROOT_DIR}/dist"
-APP_BUNDLE="${DIST_DIR}/OpenComputerUse.app"
+APP_BUNDLE="${DIST_DIR}/ComputerUseX.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 
-echo "🔨 Building OpenComputerUse (Release)..."
+echo "🔨 Building ComputerUseX (Release)..."
 cd "${ROOT_DIR}"
 swift build -c release
 
@@ -17,11 +17,11 @@ rm -rf "${APP_BUNDLE}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 cp "${ROOT_DIR}/Info.plist" "${CONTENTS_DIR}/Info.plist"
-cp "${ROOT_DIR}/.build/release/OpenComputerUseApp" "${MACOS_DIR}/OpenComputerUseApp"
-cp "${ROOT_DIR}/.build/release/ocu" "${MACOS_DIR}/ocu"
-cp "${ROOT_DIR}/.build/release/ocu" "${DIST_DIR}/ocu"
+cp "${ROOT_DIR}/.build/release/ComputerUseXApp" "${MACOS_DIR}/ComputerUseXApp"
+cp "${ROOT_DIR}/.build/release/cux" "${MACOS_DIR}/cux"
+cp "${ROOT_DIR}/.build/release/cux" "${DIST_DIR}/cux"
 
-chmod +x "${MACOS_DIR}/OpenComputerUseApp" "${MACOS_DIR}/ocu" "${DIST_DIR}/ocu" "${ROOT_DIR}/scripts/generate-icon.swift"
+chmod +x "${MACOS_DIR}/ComputerUseXApp" "${MACOS_DIR}/cux" "${DIST_DIR}/cux" "${ROOT_DIR}/scripts/generate-icon.swift"
 
 echo "🎨 Generating Google Gemini Aurora AppIcon.icns..."
 swift "${ROOT_DIR}/scripts/generate-icon.swift" "${RESOURCES_DIR}/AppIcon.icns"
@@ -34,21 +34,21 @@ DEV_NAME="$(echo "${DEV_IDENTITY_LINE}" | awk -F'"' '{print $2}' || true)"
 
 if [[ -n "${DEV_HASH}" ]]; then
     echo "🔏 Signing bundle with stable developer identity: ${DEV_NAME} (${DEV_HASH})"
-    codesign --force --sign "${DEV_HASH}" "${MACOS_DIR}/ocu"
-    codesign --force --sign "${DEV_HASH}" --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
-    codesign --force --sign "${DEV_HASH}" "${DIST_DIR}/ocu"
+    codesign --force --sign "${DEV_HASH}" "${MACOS_DIR}/cux"
+    codesign --force --sign "${DEV_HASH}" --identifier "org.computerusex.app" "${APP_BUNDLE}"
+    codesign --force --sign "${DEV_HASH}" "${DIST_DIR}/cux"
 else
     echo "🔏 Signing bundle with ad-hoc signature..."
-    codesign --force --sign - "${MACOS_DIR}/ocu"
-    codesign --force --sign - --identifier "org.opencomputeruse.app" "${APP_BUNDLE}"
-    codesign --force --sign - "${DIST_DIR}/ocu"
+    codesign --force --sign - "${MACOS_DIR}/cux"
+    codesign --force --sign - --identifier "org.computerusex.app" "${APP_BUNDLE}"
+    codesign --force --sign - "${DIST_DIR}/cux"
 fi
 
 echo "✅ Build complete!"
 echo "   • App Bundle : ${APP_BUNDLE}"
-echo "   • CLI / MCP  : ${DIST_DIR}/ocu"
+echo "   • CLI / MCP  : ${DIST_DIR}/cux"
 echo ""
 echo "🚀 Launch MenuBar HUD Daemon:"
 echo "   open \"${APP_BUNDLE}\""
 echo "🩺 Run Diagnostics:"
-echo "   \"${DIST_DIR}/ocu\" doctor"
+echo "   \"${DIST_DIR}/cux\" doctor"
