@@ -81,8 +81,22 @@ public final class MainDashboardViewModel: ObservableObject, @unchecked Sendable
     }
 
     public func removeAllowedApp(_ name: String) {
-        AuditAndSecurityGuard.shared.removeAllowedApp(name)
-        refresh()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "确认移除「\(name)」的始终允许权限？"
+        alert.informativeText = "移除后，当 AI Agent 再次尝试操控「\(name)」时，将会重新弹窗请求您的授权确认。"
+        if let appIcon = AppIconResolver.icon(for: name) {
+            alert.icon = appIcon
+        }
+        alert.addButton(withTitle: "确认移除")
+        alert.addButton(withTitle: "取消")
+        if #available(macOS 11.0, *) {
+            alert.buttons.first?.hasDestructiveAction = true
+        }
+        if alert.runModal() == .alertFirstButtonReturn {
+            AuditAndSecurityGuard.shared.removeAllowedApp(name)
+            refresh()
+        }
     }
 
     public func addAllowedApp(_ name: String) {
@@ -341,18 +355,9 @@ enum AppIconResolver {
     static func icon(for appIdentifierOrName: String) -> NSImage? {
         let trimmed = appIdentifierOrName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
-
-        // 1. Check running applications first
         let lower = trimmed.lowercased()
-        if let running = NSWorkspace.shared.runningApplications.first(where: {
-            ($0.localizedName?.lowercased() == lower) ||
-            ($0.bundleIdentifier?.lowercased() == lower) ||
-            ($0.localizedName?.lowercased().contains(lower) == true)
-        }), let icon = running.icon {
-            return icon
-        }
 
-        // 2. Check standard application paths
+        // 1. Check standard application bundle paths first (avoids matching helper processes like WeChatAppEx Helper)
         let candidatePaths: [String] = [
             "/Applications/\(trimmed).app",
             "/System/Applications/\(trimmed).app",
@@ -366,7 +371,7 @@ enum AppIconResolver {
             }
         }
 
-        // 3. Special known mappings (WeChat, iPhone Mirroring, Chrome, etc.)
+        // 2. Check known bundle ID mappings (WeChat, iPhone Mirroring, Chrome, etc.)
         let knownBundleIDs: [String: String] = [
             "wechat": "com.tencent.xinWeChat",
             "微信": "com.tencent.xinWeChat",
@@ -382,6 +387,23 @@ enum AppIconResolver {
         }
         if let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: trimmed) {
             return NSWorkspace.shared.icon(forFile: appURL.path)
+        }
+
+        // 3. Check running top-level GUI applications (.regular policy only)
+        if let running = NSWorkspace.shared.runningApplications.first(where: {
+            $0.activationPolicy == .regular && (
+                ($0.localizedName?.lowercased() == lower) ||
+                ($0.bundleIdentifier?.lowercased() == lower) ||
+                ($0.bundleURL?.deletingPathExtension().lastPathComponent.lowercased() == lower) ||
+                ($0.localizedName?.lowercased().contains(lower) == true)
+            )
+        }) {
+            if let bundleURL = running.bundleURL {
+                return NSWorkspace.shared.icon(forFile: bundleURL.path)
+            }
+            if let icon = running.icon {
+                return icon
+            }
         }
 
         return nil
@@ -429,8 +451,9 @@ private struct DashboardTabProbeRepresentable: NSViewRepresentable {
 
 struct MainDashboardRootView: View {
     @ObservedObject var viewModel: MainDashboardViewModel
+    @State private var refreshRotationAngle: Double = 0.0
 
-    private let cardDark = GeminiPalette.surfaceCard.opacity(0.54)
+    private let cardDark = GeminiPalette.surfaceCard.opacity(0.32)
 
     var body: some View {
         ZStack {
@@ -438,7 +461,7 @@ struct MainDashboardRootView: View {
             GeminiAmbientBackdropView(intensity: 1.15)
 
             VStack(alignment: .leading, spacing: 0) {
-                // Top Header Bar
+                // Top Header Bar (Cleaned up: removed Operator Agent capsule)
                 HStack(alignment: .center, spacing: 16) {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 12) {
@@ -454,40 +477,6 @@ struct MainDashboardRootView: View {
                     }
 
                     Spacer()
-
-                    // Operator Identity Capsule with Frosted Glass & Ambient Halo
-                    ZStack {
-                        Capsule()
-                            .fill(GeminiPalette.auroraHorizontalGradient)
-                            .frame(width: 210, height: 42)
-                            .blur(radius: 14)
-                            .opacity(0.26)
-
-                        HStack(spacing: 10) {
-                            GeminiSparkleIcon(size: 16, showHalo: true)
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("当前操作 Agent: \(viewModel.operatorAgent)")
-                                    .font(.system(size: 11.5, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.96))
-                                    .lineLimit(1)
-                                Text(viewModel.operatorModel)
-                                    .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundColor(GeminiPalette.textSkyBright)
-                                    .lineLimit(1)
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 8.5)
-                        .background(
-                            ZStack {
-                                Capsule().fill(.ultraThinMaterial)
-                                Capsule().fill(GeminiPalette.surfaceElevated.opacity(0.65))
-                                Capsule().strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1.1)
-                            }
-                            .shadow(color: GeminiPalette.blue.opacity(0.22), radius: 10, y: 2)
-                        )
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
                 }
                 .padding(.horizontal, 36)
                 .padding(.top, 32)
@@ -532,7 +521,7 @@ struct MainDashboardRootView: View {
                                     ZStack {
                                         if isSelected {
                                             Capsule().fill(.ultraThinMaterial)
-                                            Capsule().fill(GeminiPalette.surfaceElevated.opacity(0.78))
+                                            Capsule().fill(GeminiPalette.surfaceElevated.opacity(0.62))
                                             Capsule().strokeBorder(GeminiPalette.auroraGradient, lineWidth: 1.3)
                                         }
                                     }
@@ -551,7 +540,7 @@ struct MainDashboardRootView: View {
                     .background(
                         ZStack {
                             Capsule().fill(.ultraThinMaterial)
-                            Capsule().fill(Color.black.opacity(0.24))
+                            Capsule().fill(Color.black.opacity(0.18))
                             Capsule().strokeBorder(Color.white.opacity(0.10), lineWidth: 1)
                         }
                     )
@@ -604,7 +593,7 @@ struct MainDashboardRootView: View {
                         .background(
                             ZStack {
                                 Capsule().fill(.ultraThinMaterial)
-                                Capsule().fill(GeminiPalette.auroraHorizontalGradient.opacity(0.26))
+                                Capsule().fill(GeminiPalette.auroraHorizontalGradient.opacity(0.24))
                                 Capsule().strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.75), lineWidth: 1)
                             }
                         )
@@ -613,13 +602,17 @@ struct MainDashboardRootView: View {
                     .buttonStyle(.plain)
                     .help("在主控中心演示虚拟指针跨 Tab 点击切换动画")
 
-                    // Icon-Only Circular Refresh Button (No Text)
+                    // Icon-Only Circular Refresh Button with 360° Spin Animation
                     Button(action: {
+                        withAnimation(.easeInOut(duration: 0.55)) {
+                            refreshRotationAngle += 360.0
+                        }
                         viewModel.refresh()
                     }) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(.white.opacity(0.88))
+                            .rotationEffect(.degrees(refreshRotationAngle))
                             .frame(width: 34, height: 34)
                             .background(
                                 ZStack {
@@ -815,7 +808,21 @@ struct MainDashboardRootView: View {
 
                     // Card 3: 浏览器免焦点 DOM / JS 桥接
                     StrategyGridCardView(
-                        iconView: AnyView(AppBadgeIcon(appName: "Google Chrome")),
+                        iconView: AnyView(
+                            ZStack {
+                                LinearGradient(
+                                    colors: [GeminiPalette.mintGreen, GeminiPalette.skyBlue, GeminiPalette.blue],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
+                                Image(systemName: "globe")
+                                    .font(.system(size: 16, weight: .semibold))
+                                    .foregroundColor(.white)
+                            }
+                            .frame(width: 36, height: 36)
+                            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                            .shadow(color: GeminiPalette.mintGreen.opacity(0.32), radius: 6)
+                        ),
                         title: "浏览器免焦点桥接",
                         badgeText: "Chrome · Safari · Arc · Edge",
                         badgeColor: GeminiPalette.mintGreen,
@@ -1239,7 +1246,7 @@ private struct StrategyGridCardView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(.ultraThinMaterial)
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(GeminiPalette.surfaceCard.opacity(0.54))
+                    .fill(GeminiPalette.surfaceCard.opacity(0.32))
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
             }
@@ -1313,7 +1320,7 @@ private struct DashboardKPIBox: View {
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .fill(.ultraThinMaterial)
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .fill(GeminiPalette.surfaceCard.opacity(0.54))
+                    .fill(GeminiPalette.surfaceCard.opacity(0.32))
                 RoundedRectangle(cornerRadius: 15, style: .continuous)
                     .strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1)
             }

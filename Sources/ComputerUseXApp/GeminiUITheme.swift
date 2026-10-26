@@ -303,15 +303,15 @@ public struct GeminiAmbientBackdropView: View {
     public var body: some View {
         GeometryReader { geo in
             ZStack {
-                // 1. Real macOS Behind-Window Frosted Glass Blur
+                // 1. Real macOS Behind-Window Frosted Glass Blur (More translucent .popover material)
                 FrostedGlassVisualEffectView(
-                    material: .hudWindow,
+                    material: .popover,
                     blendingMode: .behindWindow,
                     isEmphasized: true
                 )
 
-                // 2. Translucent Obsidian Glass Tint (lets blurred desktop wallpaper/windows diffuse through)
-                GeminiPalette.canvasDeep.opacity(0.60)
+                // 2. Lighter Translucent Obsidian Glass Tint (lets blurred desktop wallpaper/windows clearly diffuse through)
+                GeminiPalette.canvasDeep.opacity(0.28)
 
                 // 3. Top-left Gemini Blue-Violet Aurora Orb
                 Circle()
