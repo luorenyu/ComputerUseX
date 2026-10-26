@@ -285,7 +285,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
 
     public func updateStatus(_ text: String) {
         DispatchQueue.main.async {
-            self.viewModel.statusText = text
+            self.viewModel.statusText = GeminiPalette.cleanStatusText(text)
             if self.viewModel.targetWindowID > 0 {
                 self.scheduleAutoHide()
             }
@@ -346,7 +346,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             self.autoHideWorkItem?.cancel()
             self.thinkingStatusWorkItem?.cancel()
             guard self.viewModel.isVisible else { return }
-            self.viewModel.statusText = "✅ 本次操作任务已完成"
+            self.viewModel.statusText = "本次操作任务已完成"
             let item = DispatchWorkItem { [weak self] in
                 guard let self = self else { return }
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -383,7 +383,7 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
         // keep the preview window open and show a clear "Agent thinking" indicator after 2.0s!
         let thinkingItem = DispatchWorkItem { [weak self] in
             guard let self = self, self.viewModel.isVisible else { return }
-            self.viewModel.statusText = "⏳ Agent 正在分析与规划下一步..."
+            self.viewModel.statusText = "Agent 正在分析与规划下一步..."
         }
         thinkingStatusWorkItem = thinkingItem
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: thinkingItem)

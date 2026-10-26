@@ -22,6 +22,33 @@ public enum GeminiPalette {
     public static let mint = Color(red: 0.32, green: 0.92, blue: 0.75)
     public static let mintGreen = mint
 
+    // High-contrast readable text tokens on dark obsidian surfaces
+    public static let textPrimary = Color.white
+    public static let textSecondary = Color(red: 0.78, green: 0.82, blue: 0.90)
+    public static let textMuted = Color(red: 0.62, green: 0.67, blue: 0.78)
+    public static let textSkyBright = Color(red: 0.64, green: 0.85, blue: 1.00)
+    public static let textMintBright = Color(red: 0.44, green: 0.98, blue: 0.80)
+    public static let textVioletBright = Color(red: 0.80, green: 0.68, blue: 0.98)
+    public static let textCoralBright = Color(red: 0.98, green: 0.56, blue: 0.60)
+
+    /// Strips leading emoji characters so text pairs cleanly with vector SF Symbols & GeminiSparkleIcon.
+    public static func cleanStatusText(_ raw: String) -> String {
+        var scalars = raw.unicodeScalars[...]
+        while let first = scalars.first {
+            let isEmojiLike = first.properties.isEmojiPresentation
+                || (first.value >= 0x2600 && first.value <= 0x27BF)
+                || (first.value >= 0x1F300 && first.value <= 0x1FAFF)
+                || first.value == 0xFE0F
+            if isEmojiLike || CharacterSet.whitespaces.contains(first) {
+                scalars = scalars.dropFirst()
+            } else {
+                break
+            }
+        }
+        let cleaned = String(scalars)
+        return cleaned.isEmpty ? raw : cleaned
+    }
+
     public static var auroraGradient: LinearGradient {
         LinearGradient(
             colors: [skyBlue, blue, violet, coral],

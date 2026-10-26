@@ -16,7 +16,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
     @Published public var showBorderGlow: Bool = false
     @Published public var pillTitle: String? = nil
     @Published public var pillSubtitle: String? = nil
-    @Published public var operatorBadgeText: String = "🤖 Antigravity · Gemini 4 Argon Medium"
+    @Published public var operatorBadgeText: String = "Antigravity · Gemini 4 Argon Medium"
     @Published public var trailPoints: [ScreenPoint] = []
     @Published public var highlightRect: ScreenRect? = nil
     @Published public var highlightLabel: String? = nil
@@ -73,7 +73,8 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     MainDashboardWindowController.shared.showWindow(section: .history)
                     return
                 }
-                MiniPreviewWindowController.shared.updateStatus(title)
+                let cleanedTitle = GeminiPalette.cleanStatusText(title)
+                MiniPreviewWindowController.shared.updateStatus(cleanedTitle)
                 if self.isTargetInBackground {
                     self.showBorderGlow = false
                     self.pillTitle = nil
@@ -81,7 +82,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     return
                 }
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    self.pillTitle = title
+                    self.pillTitle = cleanedTitle
                     self.pillSubtitle = subtitle
                     self.showBorderGlow = true
                 }
@@ -165,7 +166,7 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 VirtualCursorWindowController.shared.hideCursor()
 
             case .operatorStatus(let agentName, let modelName, let currentAction, let actionCount, let totalTokens, let costUSD):
-                self.operatorBadgeText = "🤖 \(agentName) · \(modelName)"
+                self.operatorBadgeText = "\(agentName) · \(modelName)"
                 MiniPreviewWindowController.shared.updateOperatorTelemetry(
                     agentName: agentName,
                     modelName: modelName,

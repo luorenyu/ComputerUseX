@@ -143,11 +143,16 @@ public final class MainDashboardWindowController: @unchecked Sendable {
                 win.title = "OpenComputerUse — 电脑操控中心"
                 win.titlebarAppearsTransparent = true
                 win.titleVisibility = .hidden
+                win.appearance = NSAppearance(named: .darkAqua)
                 win.backgroundColor = NSColor(calibratedRed: 0.051, green: 0.059, blue: 0.082, alpha: 1.0)
                 win.minSize = NSSize(width: 680, height: 600)
                 win.isReleasedWhenClosed = false
                 win.center()
-                win.contentView = NSHostingView(rootView: MainDashboardRootView(viewModel: self.viewModel))
+                win.contentView = NSHostingView(
+                    rootView: MainDashboardRootView(viewModel: self.viewModel)
+                        .preferredColorScheme(.dark)
+                        .environment(\.colorScheme, .dark)
+                )
                 self.window = win
             }
 
@@ -238,18 +243,18 @@ struct MainDashboardRootView: View {
                                 .foregroundColor(.white)
                             Text("Gemini Live Engine")
                                 .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundStyle(GeminiPalette.auroraHorizontalGradient)
+                                .foregroundColor(GeminiPalette.textSkyBright)
                                 .padding(.horizontal, 9)
                                 .padding(.vertical, 3.5)
                                 .background(
                                     Capsule()
-                                        .fill(GeminiPalette.blue.opacity(0.14))
+                                        .fill(GeminiPalette.blue.opacity(0.20))
                                         .overlay(Capsule().strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1))
                                 )
                         }
                         Text("管理 AI Agent 如何使用你电脑上的其他应用程序与实时消费账单")
                             .font(.system(size: 13.5, weight: .regular))
-                            .foregroundColor(.white.opacity(0.62))
+                            .foregroundColor(GeminiPalette.textSecondary)
                     }
 
                     Spacer()
@@ -267,10 +272,10 @@ struct MainDashboardRootView: View {
                             VStack(alignment: .trailing, spacing: 2) {
                                 Text("当前操作 Agent: \(viewModel.operatorAgent)")
                                     .font(.system(size: 11.5, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.95))
+                                    .foregroundColor(.white.opacity(0.96))
                                 Text(viewModel.operatorModel)
                                     .font(.system(size: 11, weight: .bold, design: .monospaced))
-                                    .foregroundStyle(GeminiPalette.auroraHorizontalGradient)
+                                    .foregroundColor(GeminiPalette.textSkyBright)
                             }
                         }
                         .padding(.horizontal, 15)
@@ -449,7 +454,7 @@ struct MainDashboardRootView: View {
                                     .shadow(color: GeminiPalette.mintGreen.opacity(0.7), radius: 4)
                                 Text("已启用零焦点 DOM / JS 浏览器控制桥接")
                                     .font(.system(size: 12))
-                                    .foregroundColor(.white.opacity(0.55))
+                                    .foregroundColor(GeminiPalette.textSecondary)
                             }
                         ),
                         trailing: AnyView(
@@ -607,25 +612,42 @@ struct MainDashboardRootView: View {
 
                     Spacer()
 
-                    HStack(spacing: 8) {
-                        TextField("输入应用名或 Bundle ID...", text: $viewModel.newAppInput)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 12))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .frame(width: 190)
-                            .background(
-                                Capsule()
-                                    .fill(cardDark)
-                                    .overlay(Capsule().strokeBorder(cardBorder, lineWidth: 1))
-                            )
-                            .onSubmit {
-                                if !viewModel.newAppInput.isEmpty {
-                                    viewModel.addAllowedApp(viewModel.newAppInput)
-                                    viewModel.newAppInput = ""
+                    HStack(spacing: 10) {
+                        HStack(spacing: 7) {
+                            Image(systemName: "magnifyingglass")
+                                .font(.system(size: 11.5, weight: .semibold))
+                                .foregroundColor(GeminiPalette.textSkyBright.opacity(0.88))
+
+                            ZStack(alignment: .leading) {
+                                if viewModel.newAppInput.isEmpty {
+                                    Text("输入应用名或 Bundle ID...")
+                                        .font(.system(size: 12, weight: .medium))
+                                        .foregroundColor(Color.white.opacity(0.68))
+                                        .allowsHitTesting(false)
                                 }
+                                TextField("", text: $viewModel.newAppInput)
+                                    .textFieldStyle(.plain)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(.white)
+                                    .onSubmit {
+                                        if !viewModel.newAppInput.isEmpty {
+                                            viewModel.addAllowedApp(viewModel.newAppInput)
+                                            viewModel.newAppInput = ""
+                                        }
+                                    }
                             }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6.5)
+                        .frame(width: 220)
+                        .background(
+                            Capsule()
+                                .fill(GeminiPalette.surfaceElevated)
+                                .overlay(
+                                    Capsule()
+                                        .strokeBorder(Color.white.opacity(0.22), lineWidth: 1)
+                                )
+                        )
 
                         Button(action: {
                             if !viewModel.newAppInput.isEmpty {
@@ -642,17 +664,17 @@ struct MainDashboardRootView: View {
                                     .font(.system(size: 12, weight: .semibold))
                             }
                             .foregroundColor(.white)
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 6)
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6.5)
                             .background(
                                 ZStack {
                                     Capsule()
-                                        .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.32))
+                                        .fill(GeminiPalette.auroraHorizontalGradient.opacity(0.38))
                                     Capsule()
-                                        .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.75), lineWidth: 1)
+                                        .strokeBorder(GeminiPalette.auroraHorizontalGradient.opacity(0.85), lineWidth: 1)
                                 }
                             )
-                            .shadow(color: GeminiPalette.blue.opacity(0.35), radius: 8)
+                            .shadow(color: GeminiPalette.blue.opacity(0.38), radius: 8)
                         }
                         .buttonStyle(.plain)
                     }
@@ -920,13 +942,13 @@ private struct ControlRowView: View {
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 13.5, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.95))
+                    .foregroundColor(.white)
                 if let subView = subtitleView {
                     subView
                 } else if let sub = subtitle {
                     Text(sub)
                         .font(.system(size: 12))
-                        .foregroundColor(.white.opacity(0.55))
+                        .foregroundColor(GeminiPalette.textSecondary)
                 }
             }
 
@@ -985,16 +1007,16 @@ private struct DashboardKPIBox: View {
 
             VStack(alignment: .leading, spacing: 5) {
                 Text(title)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.white.opacity(0.62))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(GeminiPalette.textSecondary)
                 Text(value)
                     .font(.system(size: 18, weight: .heavy, design: .monospaced))
                     .foregroundColor(accent)
                     .shadow(color: accent.opacity(0.35), radius: 6)
                     .lineLimit(1)
                 Text(subtitle)
-                    .font(.system(size: 10.5))
-                    .foregroundColor(.white.opacity(0.48))
+                    .font(.system(size: 11))
+                    .foregroundColor(GeminiPalette.textMuted)
                     .lineLimit(1)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
