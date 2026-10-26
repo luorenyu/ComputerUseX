@@ -31,6 +31,7 @@ public final class MainDashboardViewModel: ObservableObject, @unchecked Sendable
     @Published public var screenRecordingGranted: Bool = true
     @Published public var newAppInput: String = ""
     @Published public var showAddAppSheet: Bool = false
+    public var tabLocalFrames: [DashboardSection: CGRect] = [:]
 
     public init() {
         refresh()
@@ -170,6 +171,171 @@ public final class MainDashboardWindowController: @unchecked Sendable {
     public func refreshData() {
         viewModel.refresh()
     }
+
+    public func screenRectForTab(_ sec: DashboardSection) -> ScreenRect {
+        var result = ScreenRect(x: 400, y: 300, width: 140, height: 34)
+        let block = {
+            guard let win = self.window else { return }
+            let mainScreenH = NSScreen.screens.first?.frame.height ?? 900.0
+            let winTopLeftX = Double(win.frame.minX)
+            let winTopLeftY = Double(mainScreenH - win.frame.maxY)
+            if let local = self.viewModel.tabLocalFrames[sec], local.width > 10 {
+                result = ScreenRect(
+                    x: winTopLeftX + Double(local.minX),
+                    y: winTopLeftY + Double(local.minY),
+                    width: Double(local.width),
+                    height: Double(local.height)
+                )
+            } else {
+                if sec == .control {
+                    result = ScreenRect(x: winTopLeftX + 36, y: winTopLeftY + 112, width: 126, height: 34)
+                } else {
+                    result = ScreenRect(x: winTopLeftX + 174, y: winTopLeftY + 112, width: 162, height: 34)
+                }
+            }
+        }
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.sync(execute: block)
+        }
+        return result
+    }
+
+    public func switchTabOnMainThread(_ sec: DashboardSection) {
+        let block = {
+            withAnimation(.spring(response: 0.26, dampingFraction: 0.82)) {
+                self.viewModel.selectedSection = sec
+            }
+        }
+        if Thread.isMainThread {
+            block()
+        } else {
+            DispatchQueue.main.sync(execute: block)
+        }
+    }
+
+    public func runInteractiveDashboardDemo() throws -> ActionOutcome {
+        let startTime = Date()
+        showWindow(section: .control)
+        Thread.sleep(forTimeInterval: 0.20)
+
+        var startPoint = PermissionManager.shared.currentMouseLocation()
+        DispatchQueue.main.sync {
+            MiniPreviewWindowController.shared.viewModel.targetWindowID = 0
+            if let win = self.window {
+                let mainScreenH = NSScreen.screens.first?.frame.height ?? 900.0
+                let winTopLeftX = Double(win.frame.minX)
+                let winTopLeftY = Double(mainScreenH - win.frame.maxY)
+                startPoint = ScreenPoint(
+                    x: winTopLeftX + Double(win.frame.width) * 0.65,
+                    y: winTopLeftY + 128
+                )
+            }
+            OverlayHUDWindowController.shared.viewModel.updateActiveScreen(for: startPoint)
+        }
+
+        KillSwitchMonitor.shared.reset()
+        KillSwitchMonitor.shared.emitHUDEvent(
+            .statusPill(title: "ComputerUseX 视觉引擎演示", subtitle: "正在操控「电脑操控中心」来回切换功能面板")
+        )
+        KillSwitchMonitor.shared.emitHUDEvent(.setActiveGlow(true))
+
+        func animateDemoPointer(from start: ScreenPoint, to end: ScreenPoint, duration: TimeInterval) throws {
+            let steps = 22
+            let pts = CubicBezierTrajectory.sample(from: start, to: end, steps: steps)
+            let dt = max(0.008, duration / Double(pts.count))
+            var prev = start
+            for pt in pts {
+                try KillSwitchMonitor.shared.verifySafeToProceed()
+                let vx = pt.x - prev.x
+                let tilt = max(-18.0, min(18.0, vx * 0.45))
+                KillSwitchMonitor.shared.emitHUDEvent(
+                    .virtualCursorMove(point: pt, windowID: 0, pid: 0, tiltAngle: tilt, label: nil)
+                )
+                prev = pt
+                Thread.sleep(forTimeInterval: dt)
+            }
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .virtualCursorMove(point: end, windowID: 0, pid: 0, tiltAngle: 0.0, label: nil)
+            )
+        }
+
+        func clickDashboardTab(
+            from currentPt: ScreenPoint,
+            section: DashboardSection,
+            refTag: String,
+            subtitle: String,
+            moveDuration: TimeInterval,
+            dwellSeconds: TimeInterval
+        ) throws -> ScreenPoint {
+            let tabRect = self.screenRectForTab(section)
+            let targetPt = tabRect.center
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .statusPill(title: "点击 \(refTag)「\(section.rawValue)」", subtitle: subtitle)
+            )
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .highlightElement(rect: tabRect, label: "\(refTag) \(section.rawValue)")
+            )
+            try animateDemoPointer(from: currentPt, to: targetPt, duration: moveDuration)
+            KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: targetPt, windowID: 0, isPressed: true))
+            KillSwitchMonitor.shared.emitHUDEvent(.clickRipple(point: targetPt, button: .left, clickCount: 1))
+            self.switchTabOnMainThread(section)
+            Thread.sleep(forTimeInterval: 0.12)
+            KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorPress(point: targetPt, windowID: 0, isPressed: false))
+            Thread.sleep(forTimeInterval: dwellSeconds)
+            return targetPt
+        }
+
+        // Round 1: Switch to「调用历史与消费」-> Switch back to「控制与授权」
+        let pt1 = try clickDashboardTab(
+            from: startPoint,
+            section: .history,
+            refTag: "@e2",
+            subtitle: "查看 AI Agent 任务消费账单、耗时与 Token 统计",
+            moveDuration: 0.40,
+            dwellSeconds: 0.65
+        )
+        let pt2 = try clickDashboardTab(
+            from: pt1,
+            section: .control,
+            refTag: "@e1",
+            subtitle: "管理应用授权白名单、浏览器桥接与后台沙箱策略",
+            moveDuration: 0.38,
+            dwellSeconds: 0.55
+        )
+
+        // Round 2: One more back-and-forth between「调用历史与消费」and「控制与授权」
+        let pt3 = try clickDashboardTab(
+            from: pt2,
+            section: .history,
+            refTag: "@e2",
+            subtitle: "第二次切换至「调用历史与消费」验证平滑轨迹",
+            moveDuration: 0.36,
+            dwellSeconds: 0.55
+        )
+        let pt4 = try clickDashboardTab(
+            from: pt3,
+            section: .control,
+            refTag: "@e1",
+            subtitle: "切回「控制与授权」主面板",
+            moveDuration: 0.36,
+            dwellSeconds: 0.30
+        )
+
+        KillSwitchMonitor.shared.emitHUDEvent(
+            .statusPill(title: "ComputerUseX 面板操控演示完成", subtitle: "按下 Option+Esc 可随时紧急停止")
+        )
+        Thread.sleep(forTimeInterval: 0.35)
+        KillSwitchMonitor.shared.emitHUDEvent(.virtualCursorHide)
+
+        return ActionOutcome(
+            action: "hud_demo",
+            targetDescription: "Interactive Dashboard Tab Switching Demo (调用历史与消费 <-> 控制与授权)",
+            point: pt4,
+            elapsedMs: Int(Date().timeIntervalSince(startTime) * 1000)
+        )
+    }
 }
 
 // MARK: - App Icon Lookup Helper
@@ -247,16 +413,6 @@ struct MainDashboardRootView: View {
                             Text("电脑操控")
                                 .font(.system(size: 28, weight: .bold))
                                 .foregroundColor(.white)
-                            Text("Gemini Live Engine")
-                                .font(.system(size: 11, weight: .bold, design: .rounded))
-                                .foregroundColor(GeminiPalette.textSkyBright)
-                                .padding(.horizontal, 9)
-                                .padding(.vertical, 3.5)
-                                .background(
-                                    Capsule()
-                                        .fill(GeminiPalette.blue.opacity(0.20))
-                                        .overlay(Capsule().strokeBorder(GeminiPalette.subtleBorderGradient, lineWidth: 1))
-                                )
                         }
                         Text("管理 AI Agent 如何使用你电脑上的其他应用程序与实时消费账单")
                             .font(.system(size: 13.5, weight: .regular))
@@ -349,6 +505,17 @@ struct MainDashboardRootView: View {
                                         radius: 10,
                                         y: 2
                                     )
+                            )
+                            .background(
+                                GeometryReader { geo in
+                                    Color.clear
+                                        .onAppear {
+                                            viewModel.tabLocalFrames[sec] = geo.frame(in: .named("DashboardRootSpace"))
+                                        }
+                                        .onChange(of: geo.frame(in: .named("DashboardRootSpace"))) { _, newRect in
+                                            viewModel.tabLocalFrames[sec] = newRect
+                                        }
+                                }
                             )
                         }
                         .buttonStyle(.plain)
@@ -460,6 +627,7 @@ struct MainDashboardRootView: View {
                 }
             }
         }
+        .coordinateSpace(name: "DashboardRootSpace")
     }
 
     // MARK: - Section 1: Control & App Permissions (Codex Image 1 Style)

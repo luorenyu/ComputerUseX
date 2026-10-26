@@ -2,6 +2,7 @@ import Foundation
 
 public final class OCUCommandExecutor: @unchecked Sendable {
     public static let shared = OCUCommandExecutor()
+    public var customHUDDemoHandler: (() throws -> ActionOutcome)? = nil
 
     private init() {}
 
@@ -607,6 +608,9 @@ public final class OCUCommandExecutor: @unchecked Sendable {
     }
 
     private func runHUDDemoShowcase() throws -> ActionOutcome {
+        if let customHandler = customHUDDemoHandler {
+            return try customHandler()
+        }
         let startTime = Date()
         let activeDisplay = PermissionManager.shared.displayContaining(
             point: PermissionManager.shared.currentMouseLocation()

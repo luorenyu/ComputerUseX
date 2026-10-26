@@ -35,6 +35,9 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
         KillSwitchMonitor.shared.setActionLogHandler { entry in
             OverlayHUDWindowController.shared.viewModel.appendLog(entry)
         }
+        OCUCommandExecutor.shared.customHUDDemoHandler = {
+            try MainDashboardWindowController.shared.runInteractiveDashboardDemo()
+        }
         KillSwitchMonitor.shared.startMonitoringHotkey()
 
         do {
