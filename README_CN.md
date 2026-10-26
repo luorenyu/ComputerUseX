@@ -1,43 +1,20 @@
-# ✦ ComputerUseX (`cux`)
+# ComputerUseX (`cux`)
 
-**产品级原生 Computer Use 引擎 · 零焦点后台虚拟指针 · 持续画中画实时预览 · 任务级消费账单 · 全平台 AI Agent MCP / Skill 插件**
+**面向 AI Agent 的 macOS 原生桌面感知与 GUI 自动化引擎（MCP Server · CLI · 客户端插件）**
 
 [English](./README.md) | [简体中文](./README_CN.md) | [安全架构](./SECURITY.md) | [贡献指南](./CONTRIBUTING.md) | [更新日志](./CHANGELOG.md)
 
-`ComputerUseX` (`cux`) 是一款采用 **100% 原生 Swift 6（零第三方依赖）** 构建的桌面感知与 GUI 自动化操控引擎，专为 **Antigravity、Claude Code、Claude Desktop、OpenAI Codex、Cursor、Windsurf** 等 AI Agent 打造。
+`ComputerUseX` (`cux`) 是一款基于 **原生 Swift 6（零第三方依赖）** 构建的 macOS 桌面界面感知与 GUI 自动化工具，支持 **OpenAI Codex、Claude Code、Claude Desktop、Cursor、Antigravity、Windsurf** 等主流 AI Agent。
 
-告别传统 Computer Use 方案“频繁全屏截图、强行抢占物理鼠标、把后台窗口拉到前台打断用户工作、单次任务消耗数万 Token”的痛点，`ComputerUseX` 带来了 **Google Gemini Live 极光视觉风格**、**零焦点后台合成操控**、**右下角持续画中画（PiP）预览**与**完整任务消费账单**。
-
----
-
-## 🌟 核心特性与技术壁垒
-
-### 1. 🔍 三模态混合界面感知（`AXUIElement` + Apple `Vision` OCR + Set-of-Marks）
-- **毫秒级原生无障碍树（AX Tree）**：直接读取 macOS 原生交互控件并生成确定性标号（`@e1`, `@e2`, ...），彻底消除 Retina 缩放偏移与视觉大模型猜坐标误差。
-- **端侧中英混合 OCR 自动兜底**：针对微信、自绘 Canvas、Electron 应用或无标签图标，自动调用 Apple `Vision`（`VNRecognizeTextRequest`）提取文字坐标，并通过 IoU 去重与 AX 节点融合。
-- **增量 Diff 与 Compact 极速压缩**：支持 `--compact`（核心元素精简）、`--diff`（增量 DOM/AX 树对比）与感知哈希 `dHash` 图像去重，大幅降低多模态 Token 消耗。
-
-### 2. 👻 零焦点后台虚拟指针 & 右下角持续画中画（PiP）预览
-- **不抢物理鼠标、不打断前台工作**：通过 `AXPress`、`AXValue`、后台 `CGEvent.postToPid` 及 CoreGraphics 窗口级合成焦点（Synthetic Focus）直接操控后台软件，你的物理鼠标和正在工作的窗口完全不受干扰。
-- **任务全程持续显示右下角预览小窗**：当 Agent 在后台执行多步任务（例如打开微信 → 搜索联系人 → 输入并发送消息）时，右下角带有 **Gemini 极光外发光光晕的实时预览小窗** 会全程保持开启（包含大模型分析规划下一步的间隔期，底部胶囊实时提示 `"✦ Agent 正在分析与规划下一步..."`），直至任务真正结束（`cux bill --finish`）后平滑收起。
-- **一键唤起真实窗口接管**：随时点击右下角预览小窗，即可立即将后台被操作软件恢复并置顶到桌面前台。
-
-### 3. ✦ Google Gemini（手机版 Gemini Live + 电脑版）视觉设计系统
-- **多层次弥散极光光晕**：深邃星曜暗色画布（`#0D0F15`）搭配 Google Gemini 标志性四色极光渐变（天际蓝 `#66B8FF` → Gemini 蓝 `#4285F4` → 星云紫 `#9B72CB` → 珊瑚粉 `#D96570`）与四角内凹星芒图标（`✦`）。
-- **100% 统一流光刀锋指针**：桌面虚拟指针与右下角预览窗内指针完全共享同一套 `UnifiedGeminiCursorView`（无尾翼流线型极光刀锋 + 冰晶高光内切面 + 内嵌四芒星 + 针尖径向光晕与点击脉冲波纹）。
-- **多显示器单屏精准锁定**：在多屏幕办公环境下，屏幕四周的 Gemini 极光边框与底部悬浮状态胶囊**仅锁定在当前正在操作的那一块显示器上**，其余屏幕保持纯净。
-
-### 4. 🖥️ 「电脑操控中心」主窗口（`cux dashboard`）& 完整任务消费账单（`cux bill`）
-- **应用授权与后台沙箱管理**：在主窗口可视化管理「任意应用」开关、首次访问未知应用弹窗授权、「始终允许的应用」白名单、Chrome/Safari/Arc 零焦点浏览器桥接与锁屏后台沙箱。
-- **每次任务完整使用账单**：支持 Agent 调用时通过 `--agent` 与 `--model` 自报当前操作主体与大模型（如 `Antigravity · Gemini 4 Argon Medium`），精准记录 **总耗时（含大模型分析规划时间）+ ComputerUse工具调用耗时**、输入/输出 Token 数以及折算美元（USD）/ 人民币（CNY）金额。
+通过将 macOS 原生无障碍树（`AXUIElement`）、端侧 Apple `Vision` OCR 识别、Set-of-Marks（`SoM`）视觉标注与后台事件合成（`AXPress` / `CGEvent.postToPid`）结合，`ComputerUseX` 让 Agent 能够直接读取并操控后台应用，无需抢占用户的物理鼠标或打断前台工作窗口。
 
 ---
 
-## 🚀 一分钟快速开始
+## 🚀 快速安装与启动
 
-### 1. 一行命令极速安装（或源码编译安装）
+### 1. 安装
 ```bash
-# 方式 A：一行命令全自动安装（优先下载 GitHub Release 预编译包，或自动本地编译）
+# 方式 A：一行命令自动安装（优先下载 GitHub Release 预编译包，或自动本地编译）
 curl -fsSL https://raw.githubusercontent.com/luorenyu/ComputerUseX/main/scripts/install.sh | bash
 
 # 方式 B：克隆源码并编译安装
@@ -45,33 +22,259 @@ git clone https://github.com/luorenyu/ComputerUseX.git
 cd ComputerUseX
 ./scripts/install.sh
 ```
-脚本会自动将 `ComputerUseX.app` 安装至 `/Applications/ComputerUseX.app`、将命令行工具 `cux` 软链至 `~/.local/bin/cux`，并**全自动把插件、Skill 与 MCP 服务注册到 OpenAI Codex、Claude、Antigravity/Gemini 和 Cursor** 中。
 
-### 2. 启动守护进程并打开「电脑操控中心」
+安装脚本会自动完成以下配置：
+- 将桌面端应用安装至 `/Applications/ComputerUseX.app`（提供状态栏守护进程、电脑操控中心与后台实时画中画预览）。
+- 将命令行工具 `cux` 软链至 `~/.local/bin/cux`（及 `/usr/local/bin/cux`）。
+- 自动注册 **OpenAI Codex** 原生插件（`~/.codex/plugins/cache/...`）、全局 Skill（`~/.codex/skills/computer-use-x`）及 `~/.codex/config.toml` MCP 配置。
+- 自动将 `computer-use-x` MCP 服务写入 **Claude Code / Desktop**、**Cursor** 与 **Antigravity / Gemini** 配置文件。
+
+### 2. 授予系统权限并打开控制面板
 ```bash
 open /Applications/ComputerUseX.app
 cux dashboard
 ```
-在主控中心完成「辅助功能」与「屏幕录制」权限授权，点击右上角 **「✦ 演示效果 (Demo)」** 即可预览 Gemini 极光光晕与统一流光指针动画。
+首次启动后，在「电脑操控中心」引导条中开启 macOS **辅助功能（Accessibility）** 与 **屏幕录制（Screen Recording）** 权限即可使用。
 
-### 3. Agent 标准操作闭环示例
+---
+
+## 🛠️ 核心功能与使用指南
+
+### 1. 混合界面感知（`snapshot` / `query` / `wait`）
+`cux` 会提取目标应用窗口中的可交互控件，并分配确定性的引用标号（`@e1`, `@e2`, ...）。当遇到微信、Electron 或自绘 Canvas 等无障碍节点缺失的界面时，会自动调用 Apple `Vision` 框架（`zh-Hans` + `en-US`）进行端侧 OCR 兜底，并通过 IoU 重叠度去重与 AX 节点合并。
+
 ```bash
-# 1. 感知后台软件界面（开启持续画中画预览窗，并上报当前 Agent 与模型）
-cux snapshot --app "WeChat" --compact --agent "Antigravity" --model "Gemini 4 Argon Medium"
+# 获取目标应用的精简快照（仅保留核心可交互元素，节省上下文 Token）
+cux snapshot --app "WeChat" --compact
 
-# 2. 在后台平滑点击与输入（不抢占物理鼠标与前台焦点）
+# 增量模式：仅返回相比上一次快照新增、移除或数值发生变化的节点
+cux snapshot --app "WeChat" --diff
+
+# 生成带 @eX 编号框标注的 Set-of-Marks (SoM) 截图，供多模态模型视觉校验
+cux snapshot --app "Safari" --som /tmp/safari_som.png
+
+# 按控件类型或文本快速检索元素（无需导出整棵 UI 树）
+cux query --app "Notes" --role button --text "新建"
+
+# 等待目标文本出现在界面上（自动轮询 AX 树 + OCR）
+cux wait "发送" --app "WeChat" --timeout 10
+```
+
+### 2. 后台零焦点动作执行（`click` / `type` / `press` / `scroll` / `drag` / `batch`）
+执行点击或输入时，`cux` 优先使用原生无障碍动作（`AXPress`、`AXValue`）或向目标进程 PID 定向投递后台合成事件（`CGEvent.postToPid`），不移动物理鼠标、不把后台窗口拉到前台。当后台应用正在被操控时，桌面右下角会保持开启实时画中画（PiP）预览小窗。
+
+```bash
+# 通过元素标号、文本模糊匹配或屏幕坐标执行点击
 cux click @e3
-cux type @e5 "来自 ComputerUseX 的测试消息" --clear --submit
+cux click "搜索" --app "WeChat"
+cux click --x 420 --y 310 --right
 
-# 3. 结束任务并结算完整账单（平滑关闭右下角预览小窗）
-cux bill --finish --agent "Antigravity" --model "Gemini 4 Argon Medium"
+# 向输入框写入中英文文本（支持先清空 --clear 与输入后自动回车提交 --submit）
+cux type @e5 "来自 ComputerUseX 的自动消息" --clear --submit
+
+# 发送快捷键或功能键
+cux press cmd+k --app "Slack"
+cux press enter
+
+# 滚动视图或在两个元素之间拖拽
+cux scroll --dy -300 --ref @e8
+cux drag --from @e2 --to @e9
+
+# 单次调用批量执行多步 DSL 指令
+cux batch 'click @e3 ; wait 0.5 ; type @e5 "Hello" --submit'
+```
+
+### 3. 浏览器免焦点桥接（`browser`）
+无需把浏览器切到前台，即可直接读取 **Chrome、Safari、Arc、Brave、Edge** 的标签页列表、提取精简可交互 DOM，或在当前页面执行 JavaScript。
+
+```bash
+# 列出浏览器所有打开的标签页与 URL
+cux browser --app "Google Chrome" --tabs
+
+# 提取当前页面的可交互 DOM 元素（链接、按钮、输入框）
+cux browser --app "Google Chrome" --dom
+
+# 在活跃标签页中执行自定义 JavaScript
+cux browser --app "Google Chrome" --js "document.title"
+```
+
+### 4. 权限管控、窗口沙箱与任务统计（`dashboard` / `sandbox` / `bill`）
+- **应用授权控制（`cux dashboard`）**：在「电脑操控中心」管理“允许操作任意应用”或“首次访问新应用时弹窗授权”，维护应用白名单。
+- **后台窗口沙箱（`cux sandbox`）**：在自动化期间将后台目标窗口停靠至屏幕边缘沙箱区（`--park`），操作完成后恢复原位（`--restore`）。
+- **任务会话统计（`cux bill`）**：记录每次多步任务的整体耗时、工具执行耗时与预估 Token 消耗，并在任务结束（`--finish`）时关闭右下角实时预览窗。
+
+```bash
+# 打开「电脑操控中心」（查看调用历史或管理应用授权白名单）
+cux dashboard
+
+# 将目标应用移入边缘沙箱 / 恢复原窗口位置
+cux sandbox --park --app "WeChat"
+cux sandbox --restore
+
+# 结束当前任务会话并收起右下角实时预览小窗
+cux bill --finish --agent "Codex" --model "gpt-5"
+```
+
+### 5. MCP Server 工具列表（共 17 个工具）
+以 MCP 模式运行（`cux mcp`）时，通过 `stdio` JSON-RPC 2.0 暴露以下 17 个标准工具：
+
+| 工具名称 | 功能说明 |
+| :--- | :--- |
+| `cux_status` | 检查系统 TCC 权限状态、守护进程连接、屏幕分辨率与当前指针坐标 |
+| `cux_apps` | 列出正在运行的 GUI 应用与窗口信息，或启动/激活/调整目标应用窗口大小 |
+| `cux_snapshot` | 获取混合 UI 快照（`@e1..@eN`），支持 `compact`、`diff` 与 `som` 标注图 |
+| `cux_query` | 按 `role` 或 `text` 快速查找匹配控件，无需输出完整 UI 树 |
+| `cux_click` | 按 `@eX` 标号、模糊文本或 `(x, y)` 坐标点击（支持左键/右键/双击/`ax_native`） |
+| `cux_move` | 将虚拟指针移动至指定 `@eX` 元素或 `(x, y)` 坐标 |
+| `cux_type` | 通过 `AXValue` 或事务性剪贴板输入文本，支持 `clear` 清空与 `submit` 回车提交 |
+| `cux_press` | 发送按键或组合快捷键（如 `cmd+c`, `cmd+shift+p`, `enter`, `escape`, `tab`） |
+| `cux_scroll` | 在当前位置或指定 `@eX` 控件上执行像素级平滑滚动（`dx`, `dy`） |
+| `cux_drag` | 在两个元素标号（`@e1` -> `@e2`）或两组坐标之间执行拖拽 |
+| `cux_wait` | 轮询等待目标文本出现在界面上（AX + OCR）或固定等待指定秒数 |
+| `cux_batch` | 单次调用连续执行多条 DSL 动作指令（`click`, `type`, `press`, `wait`） |
+| `cux_upload_file` | 在 macOS 打开/保存文件对话框中自动选中并提交指定本地文件路径 |
+| `cux_secondary_action` | 触发原生无障碍次级动作（如 `AXShowMenu`, `AXIncrement`, `AXDecrement`） |
+| `cux_browser` | 免焦点读取 Chrome / Safari / Arc / Brave / Edge 标签页、精简 DOM 或执行 JS |
+| `cux_sandbox` | 将后台窗口停靠至边缘沙箱或恢复原始窗口位置 |
+| `cux_bill` | 查询或结算当前任务会话的耗时与 Token 统计，并关闭后台画中画预览 |
+
+---
+
+## 🏗️ 分层架构设计
+
+`ComputerUseX` 由两个可执行程序（命令行/MCP 程序 `cux` 与桌面守护程序 `ComputerUseX.app`）和共享核心库 `OCUCore` 组成，整体架构自上而下划分为 **五层**：
+
+```
++-----------------------------------------------------------------------------------+
+| 第一层：Agent 协议与接入层 (Protocol & Interface Layer)                            |
+|   - MCP Server (stdio JSON-RPC 2.0)        [Sources/OCUCore/MCP/MCPServer.swift]  |
+|   - CLI 命令路由 (`cux`)                   [Sources/cux/main.swift]               |
+|   - 客户端插件与 Skill 规范                 [plugins/codex/, skills/]              |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+| 第二层：会话治理与安全审计层 (Session Governance & Security Layer)                 |
+|   - 应用访问控制与弹窗授权拦截              [Sources/OCUCore/Safety/]              |
+|   - 密码框与安全输入保护                    (检测 SecureEventInput / 密码框阻断输入)|
+|   - 审计日志与会话统计存储                  (~/.computerusex/*.jsonl)              |
++--------------------+-----------------------------------------+--------------------+
+                     |                                         |
+                     v                                         v
++----------------------------------------+ +----------------------------------------+
+| 第三层：多模态感知与定位层             | | 第四层：混合动作执行层                 |
+| (Hybrid Perception Layer)              | | (Hybrid Action Execution Layer)        |
+| - AX 树遍历与语义剪枝 (`AXUIElement`)  | | - Tier 1: 原生 AX (`AXPress`/`AXValue`)|
+|   [Sources/OCUCore/AX/AXEngine.swift]  | | - Tier 2: 后台进程级合成 (`postToPid`) |
+| - Apple Vision OCR 与 IoU 融合去重     | | - Tier 3: 前台硬件级 `CGEvent` 兜底    |
+|   [Sources/OCUCore/OCR/]               | |   [Sources/OCUCore/Action/]            |
+| - 窗口级截图、dHash 指纹与 SoM 标注    | | - 浏览器 DOM/JS 桥接 (JXA/AppleScript) |
+|   [Sources/OCUCore/Capture/]           | |   [Sources/OCUCore/Browser/]           |
+| - 增量快照对比引擎 (Diff Engine)       | | - 窗口边缘沙箱管理 (Ghost Space)       |
+|   [Sources/OCUCore/Perception/]        | |   [Sources/OCUCore/Sandbox/]           |
++--------------------+-------------------+ +-------------------+--------------------+
+                     |                                         |
+                     +--------------------+--------------------+
+                                          | Unix Domain Socket (/tmp/cux-<uid>.sock)
+                                          v
++-----------------------------------------------------------------------------------+
+| 第五层：常驻守护进程与视觉反馈层 (Companion Daemon & Feedback Layer)               |
+|   - Unix Socket IPC 通信服务端/客户端       [Sources/OCUCore/IPC/UnixSocketIPC]    |
+|   - 状态栏控制器与「电脑操控中心」主面板    [Sources/ComputerUseXApp/MainDashboard]|
+|   - 后台窗口实时画中画 (PiP) 预览流         [Sources/ComputerUseXApp/MiniWindow]   |
+|   - 免焦点鼠标穿透桌面提示层 (Overlay HUD)  [Sources/ComputerUseXApp/AgentCursor]  |
++-----------------------------------------------------------------------------------+
+```
+
+### 各层核心职责
+
+1. **第一层：Agent 协议与接入层（`MCP` + `CLI` + `Plugins`）**
+   - 负责解析来自 MCP 客户端（`cux mcp`）的 JSON-RPC 2.0 请求或命令行参数（`cux snapshot`、`cux click` 等）。
+   - 维护元素引用映射表（`@e1` -> `UIElementNode`），并将最新快照持久化至 `~/.computerusex/last_snapshot.json`，使得无状态的多次 CLI 调用之间能够共享同一套 `@eX` 元素引用。
+2. **第二层：会话治理与安全审计层（`Safety`）**
+   - 在每次感知与动作执行前进行统一拦截校验。
+   - 检查目标应用是否在用户允许范围内（支持全局放行或按 Bundle ID 白名单管控；遇到未授权应用时通过 IPC 唤起原生授权确认弹窗）。
+   - 检测 macOS `IsSecureEventInputEnabled()` 状态与 `AXSecureTextField` 密码框角色，自动拒绝在密码输入框上回显或注入敏感按键。
+   - 将每次工具调用的耗时、目标应用及会话统计以追加写（Append-Only JSONL）方式记录至 `~/.computerusex/`。
+3. **第三层：多模态感知与定位层（`AX` + `OCR` + `Capture` + `Perception`）**
+   - **AX 引擎**：带深度与节点上限保护地遍历目标应用的 `AXUIElement` 树，归一化角色、标题、值、可用状态与屏幕坐标框。
+   - **Vision OCR 引擎**：针对目标窗口的 `CGWindowListCreateImage` 缓冲区执行 `VNRecognizeTextRequest` 识别，并通过 `IoU > 0.45` 阈值过滤掉已存在 AX 节点的重复文本区域。
+   - **截图与 SoM 渲染器**：计算 64 位感知哈希（`dHash`）以判断画面是否发生实质变化，并在需要时绘制 `@eX` 视觉锚点标注图。
+   - **增量对比引擎**：对比前后两次快照节点集合，仅输出新增、消失或属性变化的节点（`--diff`）。
+4. **第四层：混合动作执行层（`Action` + `Browser` + `Sandbox`）**
+   - 采用 **三级动作路由策略**：
+     - **Tier 1（原生无障碍直接触发）**：直接对目标 `AXUIElement` 调用 `AXPress`、`AXRaise` 或写入 `kAXValueAttribute`。
+     - **Tier 2（后台进程级事件合成）**：构造窗口级合成焦点并通过 `CGEvent.postToPid` 直接将鼠标/键盘事件发送给目标进程，实现在后台完成点击与输入而不移动物理鼠标。
+     - **Tier 3（前台硬件事件兜底）**：当部分非标应用忽略后台事件时，回退至屏幕级 `CGEvent` 注入。
+   - 内置事务性剪贴板输入机制（写入前备份用户剪贴板内容，粘贴完成后自动还原），确保中英文及符号稳定输入。
+5. **第五层：常驻守护进程与视觉反馈层（`IPC` + `ComputerUseXApp`）**
+   - 由于 CLI 或单次脚本调用是短生命周期进程，图形界面与跨步骤状态由常驻的 `ComputerUseX.app` 承载。
+   - `cux` 通过低延迟 Unix Domain Socket（`/tmp/cux-<uid>.sock`）向 `ComputerUseX.app` 发送事件，驱动桌面操作位置提示、在多步任务期间保持右下角画中画（PiP）实时预览窗口开启，以及提供「电脑操控中心」管理界面。
+
+---
+
+## 🧭 架构扩展能力与后续规划
+
+`ComputerUseX` 在 `Sources/OCUCore/` 内部对数据结构（`UIElementNode`、`SnapshotResult`）与底层系统 API 进行了模块解耦，后续架构可沿以下方向扩展：
+
+### 1. 跨平台系统驱动抽象（Linux & Windows 扩展支持）
+目前第一层（MCP/CLI）、第二层（安全审计与账单）、第三层的快照 Diff 引擎与 IoU 融合逻辑均基于平台无关的 Swift 模型。后续可将第三、四层的系统原生调用抽象为统一的平台驱动协议（`PlatformPerceptionDriver` / `PlatformActionDriver`）：
+- **macOS（当前）**：`AXUIElement` + Apple `Vision` + `CoreGraphics`。
+- **Linux（规划）**：基于 `AT-SPI2` 无障碍总线 + `X11`（`XTest` / `XComposite`）/ `Wayland`（`wlr-screencopy`）+ ONNX/Tesseract OCR。
+- **Windows（规划）**：基于 Windows `UIAutomation`（`IUIAutomation`）+ `WinRT GraphicsCapture` + `SendInput` / `Windows.Media.Ocr`。
+
+### 2. 可插拔的端侧视觉定位模型（Pluggable Grounding Providers）
+针对完全使用自绘引擎渲染（既无 `AXUIElement` 节点、也没有文字可供 OCR 识别的纯图标/画布应用，如游戏、远程桌面、复杂图形软件）：
+- 在第三层感知管线中引入 `GroundingProvider` 接口，支持接入运行在 Apple Silicon 本地（基于 MLX / CoreML）的轻量化 UI 元素检测模型（如 OmniParser、UI-TARS 等），将模型检测出的图标框与 `AXEngine`、`VisionOCREngine` 结果统一融合进 `@e1..@eN` 标号体系。
+
+### 3. 浏览器 Chrome DevTools Protocol (CDP) 原生直连
+目前 `BrowserBridge` 通过 JXA/AppleScript 实现零配置免焦点读取。后续将扩展支持直接通过 WebSocket 连接 Chromium 内核的 **CDP 协议**：
+- 直接拉取浏览器完整无障碍树（`Accessibility.getFullAXTree`）并穿透 Shadow DOM / iframe。
+- 支持在 Agent 操作网页期间监听网络请求（Network Interception）与控制台日志。
+
+### 4. 操作录制与确定性回放（Workflow Record & Replay）
+结合系统事件监听与第三层的语义快照，将人工演示操作录制为基于语义选择器（`@eX` 的 `role` + `title` 约束，而非脆弱的固定屏幕坐标）的 `cux batch` 脚本，或一键导出为可复用的 Agent Skill。
+
+### 5. 远程与虚拟机沙箱执行目标（Remote / VM Target）
+由于接入层（Layer 1–2）与执行层（Layer 3–5）之间通过结构化指令与 IPC 协议通信，后续支持通过 SSH 或 gRPC 将 `cux` 指令转发至基于 macOS `Virtualization.framework`（如 Tart）的隔离虚拟机中执行，使高风险自动化任务在独立虚拟桌面内运行，同时将画面流式回传至宿主机右下角预览窗。
+
+---
+
+## 📂 代码目录结构
+
+```text
+ComputerUseX/
+├── Package.swift                       # Swift 6 包配置 (OCUCore, cux, ComputerUseXApp)
+├── Sources/
+│   ├── OCUCore/                        # 核心引擎库
+│   │   ├── Models/                     # UIElementNode, SnapshotResult, IPC 与审计数据模型
+│   │   ├── AX/                         # macOS AXUIElement 遍历与语义过滤
+│   │   ├── OCR/                        # Apple Vision 端侧 OCR 与 IoU 去重融合
+│   │   ├── Capture/                    # 窗口级截图、dHash 感知哈希与 SoM 视觉标注渲染
+│   │   ├── Perception/                 # 增量快照 Diff 引擎
+│   │   ├── Action/                     # 三级混合点击/输入/按键/滚动/拖拽执行器
+│   │   ├── Browser/                    # Chrome/Safari/Arc/Brave/Edge DOM 与 JS 桥接
+│   │   ├── Sandbox/                    # 后台窗口边缘停靠与恢复管理
+│   │   ├── Safety/                     # 应用权限拦截、密码框保护、审计日志与统计
+│   │   ├── IPC/                        # Unix Domain Socket 通信服务端与客户端
+│   │   └── MCP/                        # stdio JSON-RPC 2.0 MCP Server (17 个工具)
+│   ├── cux/                            # CLI 与 MCP 命令行程序入口
+│   └── ComputerUseXApp/                # macOS 状态栏守护进程、电脑操控中心与实时画中画预览
+├── plugins/codex/                      # OpenAI Codex 原生插件包 (.codex-plugin & marketplace)
+├── skills/computer-use-x/              # Agent Skill 技能定义 (SKILL.md)
+├── scripts/                            # 应用打包脚本 (build-app.sh) 与一键安装脚本 (install.sh)
+└── Tests/OCUCoreTests/                 # 单元测试套件
 ```
 
 ---
 
-## 🧪 单元测试
+## 🧪 本地编译与测试
 
 ```bash
+# 编译 Release 二进制并打包 ComputerUseX.app
+./scripts/build-app.sh
+
+# 运行单元测试
 swift test
 ```
 

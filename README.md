@@ -1,140 +1,279 @@
-# ✦ ComputerUseX (`cux`)
+# ComputerUseX (`cux`)
 
-**Product-Grade Desktop Computer Use Engine, Zero-Focus Background Virtual Cursor, Live PiP Preview, Session Billing & Universal MCP / Skill Plugin for AI Agents.**
+**Native macOS Desktop Perception & GUI Automation Engine for AI Agents (MCP Server, CLI & Client Plugins)**
 
 [English](./README.md) | [简体中文](./README_CN.md) | [Security Policy](./SECURITY.md) | [Contributing](./CONTRIBUTING.md) | [Changelog](./CHANGELOG.md)
 
-`ComputerUseX` (`cux`) is a **100% native Swift 6** (zero external dependencies) desktop perception and GUI automation engine designed for **Antigravity, Claude Code, Claude Desktop, OpenAI Codex, Cursor, and Windsurf**.
+`ComputerUseX` (`cux`) is a native Swift 6 (zero external dependencies) desktop perception and GUI automation toolkit built for **OpenAI Codex, Claude Code, Claude Desktop, Cursor, Antigravity, and Windsurf**.
 
-Unlike screenshot-only Computer Use wrappers that hijack your physical mouse, yank background windows to the front, and burn tens of thousands of vision tokens per task, `ComputerUseX` operates background apps silently with a **Google Gemini Live-inspired UI**, a **Zero-Focus Virtual Cursor**, a **Persistent Live Picture-in-Picture (PiP) Preview**, and **Full Session Usage Billing**.
-
----
-
-## 🌟 Key Highlights
-
-### 1. 🔍 Tri-Modal Hybrid Grounding (`AXUIElement` + Apple `Vision` OCR + Set-of-Marks)
-- **Millisecond Native AX Tree**: Directly traverses macOS `AXUIElement` hierarchies (`button`, `textfield`, `menuitem`, `checkbox`, etc.) and assigns deterministic references (`@e1`, `@e2`, ...).
-- **On-Device Vision OCR Fallback**: Automatically runs Apple `Vision` (`VNRecognizeTextRequest`, `zh-Hans` + `en-US`) on custom canvases, Electron/WeChat views, or unlabelled icons, deduplicating against AX nodes via IoU matching.
-- **Set-of-Marks (SoM) Visual Annotation**: Renders color-coded bounding boxes and `@eX` badges onto window-cropped screenshots for multimodal verification.
-- **Token-Saving Compact & Diff Engine**: Supports `--compact` (top-N salient elements), `--diff` (incremental AX tree diff), and perceptual `dHash` image deduplication.
-
-### 2. 👻 Zero-Focus Background Virtual Cursor & Persistent Live PiP Preview
-- **Never Hijacks Your Physical Mouse**: Dispatches actions directly to target windows (`AXPress`, `AXValue`, background `CGEvent.postToPid`, and CoreGraphics window-specific synthetic focus) without moving your hardware cursor or stealing foreground focus.
-- **Persistent Bottom-Right Live PiP Window**: While an Agent operates a background app (e.g., sending a WeChat message across multiple steps), a floating **Gemini Aurora-framed Live PiP Window** stays continuously open in the bottom-right corner—showing the unified virtual pointer, click ripples, and `"✦ Agent 正在分析与规划下一步..."` status—until `cux bill --finish` completes the task.
-- **One-Click Foreground Takeover**: Click anywhere on the Live PiP preview window to immediately unminimize and summon the real target window to the front.
-
-### 3. ✦ Google Gemini (Mobile Live & Desktop) Design System
-- **Ambient Aurora Halos**: Deep obsidian canvas (`#0D0F15`) paired with diffused 4-stop Google Gemini Aurora gradients (`#66B8FF` -> `#4285F4` -> `#9B72CB` -> `#D96570`) and concave 4-point Gemini sparkle icons (`✦`).
-- **100% Unified Cyber-Blade Pointer**: Both the desktop virtual cursor and the Mini PiP preview cursor share a single `UnifiedGeminiCursorView` with an aerodynamic tailless aurora blade, crystalline inner facet, 4-point sparkle glint, and tip energy halo.
-- **Multi-Monitor Single-Screen Lock**: In multi-display setups, the screen-edge Gemini Aurora border glow and floating bottom status capsule lock strictly onto the single display currently being operated on.
-
-### 4. 🖥️ Main Control Center (`cux dashboard`) & End-to-End Session Billing (`cux bill`)
-- **App Authorization & Sandbox Control Center**: Manage "Allow Any App" vs. interactive first-time app consent prompts, per-app allowlists, zero-focus Chrome/Safari/Arc/Brave/Edge DOM bridges, and lock-screen background sandboxing.
-- **Complete Task Billing Receipts**: Tracks which **Agent** and **LLM Model** (e.g., `Antigravity · Gemini 4 Argon Medium`) is operating `ComputerUseX`, recording **Total Task Duration (including LLM thinking time) + ComputerUse Tool Execution Duration**, input/output tokens, and USD / CNY cost.
+It bridges AI Agents to desktop applications by combining macOS Accessibility trees (`AXUIElement`), on-device Apple `Vision` OCR, Set-of-Marks (`SoM`) visual grounding, and background event synthesis (`AXPress` / `CGEvent.postToPid`), allowing Agents to inspect and operate desktop apps without hijacking your physical mouse or foreground window focus.
 
 ---
 
-## 🏗️ Architecture
+## 🚀 Quick Start & Installation
 
-```
-+-------------------------------------------------------------------------+
-|   Antigravity  |  Claude Code / Desktop  |  Cursor  |   OpenAI Codex    |
-+------------------------------------+------------------------------------+
-                                     | MCP (stdio JSON-RPC 2.0) or Skill CLI
-                                     v
-+-------------------------------------------------------------------------+
-|                      `cux` (CLI & MCP Server Binary)                    |
-|  - 17 MCP Tools (`cux mcp`) & CLI Subcommands                           |
-|  - Self-reporting `--agent` & `--model` telemetry                       |
-+------------------------------------+------------------------------------+
-                                     | Unix Domain Socket (/tmp/cux-<uid>.sock)
-                                     v
-+-------------------------------------------------------------------------+
-|          `ComputerUseX.app` (MenuBar Daemon & Gemini HUD)               |
-|  - Native NSStatusItem + NSPopover MenuBar Controller                   |
-|  - Main Control Center (`cux dashboard`) & App Permission Guard         |
-|  - Persistent Bottom-Right Live PiP Preview & Unified Gemini Pointer    |
-|  - Single-Display Locked Full-Screen Click-Through Gemini Aurora HUD    |
-+-------------------------------------------------------------------------+
-```
-
----
-
-## 🚀 1-Minute Quick Start
-
-### 1. One-Line Install (or Build from Source)
+### 1. Install
 ```bash
-# Option A: One-line installer (downloads latest release or builds automatically)
+# Option A: One-line installer (downloads prebuilt release binary or builds from source)
 curl -fsSL https://raw.githubusercontent.com/luorenyu/ComputerUseX/main/scripts/install.sh | bash
 
-# Option B: Clone & build from source
+# Option B: Clone & install from source
 git clone https://github.com/luorenyu/ComputerUseX.git
 cd ComputerUseX
 ./scripts/install.sh
 ```
-This installs `/Applications/ComputerUseX.app`, links `~/.local/bin/cux`, and automatically registers the **Codex Plugin & Skill**, **Claude Code / Desktop MCP**, **Gemini / Antigravity MCP**, and **Cursor MCP**.
 
-### 2. Launch the Companion App & Open Control Center
+What the installer configures automatically:
+- Installs `/Applications/ComputerUseX.app` (MenuBar daemon, Control Center & Live PiP preview).
+- Links the `cux` binary to `~/.local/bin/cux` (and `/usr/local/bin/cux` if writable).
+- Registers the **OpenAI Codex** native plugin (`~/.codex/plugins/cache/...`), skill (`~/.codex/skills/computer-use-x`), and MCP entry (`~/.codex/config.toml`).
+- Registers the `computer-use-x` MCP server in **Claude Code / Desktop**, **Cursor**, and **Antigravity / Gemini**.
+
+### 2. Grant Permissions & Launch Companion App
 ```bash
 open /Applications/ComputerUseX.app
 cux dashboard
 ```
-Grant **Accessibility** and **Screen Recording** permissions using the one-click onboarding banner in the Control Center, then click **"✦ 演示效果 (Demo)"** (or run `cux hud-demo`) to preview the Gemini Aurora HUD and unified pointer.
-
-### 3. Core Agent CLI Workflow
-```bash
-# 1. Inspect a background app (opens persistent Live PiP preview & reports Agent/Model)
-cux snapshot --app "WeChat" --compact --agent "Antigravity" --model "Gemini 4 Argon Medium"
-
-# 2. Click & type in the background without stealing foreground focus
-cux click @e3
-cux type @e5 "Hello from ComputerUseX!" --clear --submit
-
-# 3. Finish task session (closes Live PiP preview & records complete session bill)
-cux bill --finish --agent "Antigravity" --model "Gemini 4 Argon Medium"
-```
+Enable **Accessibility** and **Screen Recording** permissions in the Control Center when prompted.
 
 ---
 
-## 🔌 MCP Server Integration (17 Tools)
+## 🛠️ Core Features & Usage
 
-Add to your MCP configuration (`mcp_config.json` or `claude_desktop_config.json`), or run `cux install-mcp`:
-```json
-{
-  "mcpServers": {
-    "computer-use-x": {
-      "command": "/Applications/ComputerUseX.app/Contents/MacOS/cux",
-      "args": ["mcp"]
-    }
-  }
-}
+### 1. Hybrid UI Perception (`snapshot`, `query`, `wait`)
+`cux` extracts interactive elements from any running application and assigns deterministic references (`@e1`, `@e2`, ...). If an app uses custom rendering (Electron, WeChat, canvas views) where `AXUIElement` nodes are missing, `cux` automatically falls back to Apple `Vision` OCR (`zh-Hans` + `en-US`) and merges results via IoU deduplication.
+
+```bash
+# Capture compact snapshot of a target app (top salient interactive elements)
+cux snapshot --app "WeChat" --compact
+
+# Capture only incremental changes since the last snapshot
+cux snapshot --app "WeChat" --diff
+
+# Generate a Set-of-Marks (SoM) annotated screenshot with @eX bounding boxes
+cux snapshot --app "Safari" --som /tmp/safari_som.png
+
+# Fast element lookup by role or text without dumping the full tree
+cux query --app "Notes" --role button --text "New"
+
+# Wait until specific text appears in the target app (polls AX + OCR)
+cux wait "Send" --app "WeChat" --timeout 10
 ```
+
+### 2. Background GUI Actions (`click`, `type`, `press`, `scroll`, `drag`, `batch`)
+Actions are routed through native Accessibility actions (`AXPress`, `AXValue`) or window-targeted `CGEvent` synthesis first, keeping your hardware cursor and active foreground window undisturbed. When operating a background window, `ComputerUseX.app` displays a Live Picture-in-Picture (PiP) preview in the bottom-right corner.
+
+```bash
+# Click by element reference, fuzzy text label, or screen coordinates
+cux click @e3
+cux click "Search" --app "WeChat"
+cux click --x 420 --y 310 --right
+
+# Type multi-language text into an input field, optionally clearing first and submitting
+cux type @e5 "Hello from ComputerUseX" --clear --submit
+
+# Send keyboard shortcuts or key presses
+cux press cmd+k --app "Slack"
+cux press enter
+
+# Scroll or drag between elements
+cux scroll --dy -300 --ref @e8
+cux drag --from @e2 --to @e9
+
+# Execute a multi-step sequence in a single call
+cux batch 'click @e3 ; wait 0.5 ; type @e5 "Automated message" --submit'
+```
+
+### 3. Browser Inspection & JS Bridge (`browser`)
+Inspect open browser tabs, extract a simplified interactive DOM, or evaluate JavaScript in **Chrome, Safari, Arc, Brave, and Edge** without bringing the browser window to the front.
+
+```bash
+# List all open tabs and active URLs
+cux browser --app "Google Chrome" --tabs
+
+# Extract interactive DOM elements (links, buttons, inputs)
+cux browser --app "Google Chrome" --dom
+
+# Run custom JavaScript in the active tab
+cux browser --app "Google Chrome" --js "document.title"
+```
+
+### 4. Access Control, Window Sandbox & Usage Tracking (`dashboard`, `sandbox`, `bill`)
+- **App Authorization (`cux dashboard`)**: Configure whether Agents can operate any application or must request approval per app via an allowlist.
+- **Window Sandbox (`cux sandbox`)**: Move background target windows to a peripheral screen region (`--park`) during automation and restore their original frame (`--restore`) afterward.
+- **Session Telemetry (`cux bill`)**: Record task duration, tool execution time, and estimated token usage across multi-step Agent workflows.
+
+```bash
+# Open the desktop Control Center (Usage History & Access Control)
+cux dashboard
+
+# Park and restore a background app window
+cux sandbox --park --app "WeChat"
+cux sandbox --restore
+
+# Finish a task session and close the Live PiP preview
+cux bill --finish --agent "Codex" --model "gpt-5"
+```
+
+### 5. MCP Server Tools Reference (17 Tools)
+When running as an MCP server (`cux mcp`), the following tools are exposed over `stdio` JSON-RPC 2.0:
 
 | Tool | Description |
 | :--- | :--- |
-| `cux_status` | Inspect TCC permissions, daemon connection, screen resolution, and cursor coordinates |
-| `cux_apps` | List running GUI apps & windows, or focus/launch/resize a target application |
-| `cux_snapshot` | Capture Tri-Modal UI snapshot (`@e1..@eN`) with `--compact`, `--diff`, and optional SoM PNG |
-| `cux_query` | Targeted fast lookup for matching UI elements by role or text without full window dump |
-| `cux_click` | Click by `@eX` reference, fuzzy label, or `(x, y)` coordinates (left/right/double/ax_native) |
-| `cux_move` | Glide unified Gemini pointer smoothly along a cubic Bézier curve to `@eX` or `(x, y)` |
-| `cux_type` | Type multi-language text safely via `AXValue` or transactional pasteboard with `--clear` / `--submit` |
-| `cux_press` | Press key or shortcut combination (`cmd+c`, `cmd+shift+p`, `enter`, `escape`, `tab`) |
-| `cux_scroll` | Smooth pixel scrolling (`dx`, `dy`) at current cursor or target `@eX` |
-| `cux_drag` | Smooth drag between two elements (`@e1` -> `@e2`) or coordinate pairs |
-| `cux_wait` | Poll until target text appears on screen (AX + OCR) or wait for fixed seconds |
-| `cux_batch` | Execute multiple DSL commands (`click @e1`, `type "text" --submit`, `wait`) in one call |
-| `cux_upload_file` | Select and submit a local file path inside a macOS Open/Save file dialog |
-| `cux_secondary_action` | Invoke native Accessibility secondary actions (`AXShowMenu`, `AXIncrement`, etc.) |
-| `cux_browser` | Zero-focus DOM & JavaScript bridge for Chrome, Safari, Arc, Brave, and Edge |
-| `cux_sandbox` | Park or restore background windows in the Ghost Space peripheral sandbox |
-| `cux_bill` | Query or finalize task session usage bills (`Total Duration + Tool Duration`, Tokens, USD/CNY) |
+| `cux_status` | Check TCC permissions, daemon connection, screen geometry, and cursor coordinates |
+| `cux_apps` | List running GUI apps & windows, or launch/activate/resize a target application |
+| `cux_snapshot` | Capture hybrid UI snapshot (`@e1..@eN`) with `compact`, `diff`, and optional SoM image |
+| `cux_query` | Query matching UI elements by `role` or `text` without a full tree dump |
+| `cux_click` | Click by `@eX` reference, fuzzy label, or `(x, y)` coordinates (`left`/`right`/`double`/`ax_native`) |
+| `cux_move` | Move virtual pointer to `@eX` or `(x, y)` |
+| `cux_type` | Input text via `AXValue` or transactional pasteboard with `clear` and `submit` options |
+| `cux_press` | Send key press or shortcut combination (`cmd+c`, `cmd+shift+p`, `enter`, `escape`, `tab`) |
+| `cux_scroll` | Pixel scrolling (`dx`, `dy`) at current pointer or target `@eX` |
+| `cux_drag` | Drag between two element references (`@e1` -> `@e2`) or coordinate pairs |
+| `cux_wait` | Poll until target text appears on screen (AX + OCR) or sleep for fixed seconds |
+| `cux_batch` | Execute multiple DSL commands (`click`, `type`, `press`, `wait`) in one call |
+| `cux_upload_file` | Select and confirm a local file path inside a macOS Open/Save file dialog |
+| `cux_secondary_action` | Trigger native Accessibility actions (`AXShowMenu`, `AXIncrement`, `AXDecrement`, etc.) |
+| `cux_browser` | Inspect tabs, simplified DOM, or run JavaScript in Chrome, Safari, Arc, Brave, and Edge |
+| `cux_sandbox` | Park or restore background windows during automation |
+| `cux_bill` | Query or finalize task session telemetry and close active PiP preview sessions |
 
 ---
 
-## 🧪 Testing
+## 🏗️ Layered Architecture Design
+
+`ComputerUseX` is structured into **five decoupled layers** across two executables (`cux` CLI/MCP binary and `ComputerUseX.app` companion daemon) sharing a single core library (`OCUCore`):
+
+```
++-----------------------------------------------------------------------------------+
+| Layer 1: Agent Protocol & Interface Layer                                         |
+|   - MCP Server (stdio JSON-RPC 2.0)        [Sources/OCUCore/MCP/MCPServer.swift]  |
+|   - CLI Subcommand Router (`cux`)          [Sources/cux/main.swift]               |
+|   - Client Plugins & Skills                [plugins/codex/, skills/]              |
++-----------------------------------------+-----------------------------------------+
+                                          |
+                                          v
++-----------------------------------------------------------------------------------+
+| Layer 2: Session Governance & Security Layer                                      |
+|   - App Access Control & Consent Guard     [Sources/OCUCore/Safety/]              |
+|   - Secure Input / Password Field Shield   (Blocks keystrokes on SecureEventInput)|
+|   - Append-Only Audit Log & Billing Store  (~/.computerusex/*.jsonl)              |
++--------------------+-----------------------------------------+--------------------+
+                     |                                         |
+                     v                                         v
++----------------------------------------+ +----------------------------------------+
+| Layer 3: Hybrid Perception Layer       | | Layer 4: Hybrid Action Execution Layer |
+| - AX Tree Traversal (`AXUIElement`)    | | - Tier 1: Native AX (`AXPress`/`Value`)|
+|   [Sources/OCUCore/AX/AXEngine.swift]  | | - Tier 2: Background `CGEvent` to PID  |
+| - Apple Vision OCR & IoU Deduplication | | - Tier 3: Hardware `CGEvent` Fallback  |
+|   [Sources/OCUCore/OCR/]               | |   [Sources/OCUCore/Action/]            |
+| - Window Capture, dHash & SoM Renderer | | - Browser DOM/JS Bridge (JXA/OSA)      |
+|   [Sources/OCUCore/Capture/]           | |   [Sources/OCUCore/Browser/]           |
+| - Incremental Snapshot Diff Engine     | | - Off-Screen Window Sandbox Manager    |
+|   [Sources/OCUCore/Perception/]        | |   [Sources/OCUCore/Sandbox/]           |
++--------------------+-------------------+ +-------------------+--------------------+
+                     |                                         |
+                     +--------------------+--------------------+
+                                          | Unix Domain Socket (/tmp/cux-<uid>.sock)
+                                          v
++-----------------------------------------------------------------------------------+
+| Layer 5: Companion Daemon & Visual Feedback Layer (`ComputerUseX.app`)            |
+|   - Unix Socket IPC Server/Client          [Sources/OCUCore/IPC/UnixSocketIPC]    |
+|   - MenuBar Controller & Control Center    [Sources/ComputerUseXApp/MainDashboard]|
+|   - Live PiP Background Window Streamer    [Sources/ComputerUseXApp/MiniWindow]   |
+|   - Non-Activating Click-Through Overlay   [Sources/ComputerUseXApp/AgentCursor]  |
++-----------------------------------------------------------------------------------+
+```
+
+### Layer Responsibilities
+
+1. **Layer 1 — Agent Protocol & Interface Layer (`MCP` + `CLI` + `Plugins`)**
+   - Translates incoming requests from MCP clients (`cux mcp`) or shell subcommands (`cux snapshot`, `cux click`, etc.) into strongly typed internal operations.
+   - Maintains an in-memory element reference map (`@e1` -> `UIElementNode`) across consecutive tool calls and persists snapshot state (`~/.computerusex/last_snapshot.json`) so stateless CLI invocations share the same element references.
+2. **Layer 2 — Session Governance & Security Layer (`Safety`)**
+   - Intercepts every perception and action request before execution.
+   - Verifies application authorization against user rules (`allowAnyApp` or per-bundle allowlist); if an unauthorized app is targeted, triggers a native authorization dialog via the companion daemon.
+   - Detects macOS `IsSecureEventInputEnabled()` and `AXSecureTextField` roles to prevent accidental credential leakage or password interception.
+   - Writes structured audit events and session usage records to `~/.computerusex/`.
+3. **Layer 3 — Hybrid Perception Layer (`AX` + `OCR` + `Capture` + `Perception`)**
+   - **AX Engine**: Traverses the target application's `AXUIElement` hierarchy with depth/node guards, normalizing roles, titles, values, enabled/focused states, and screen frames.
+   - **Vision OCR Engine**: Runs `VNRecognizeTextRequest` on window-specific `CGWindowListCreateImage` buffers when AX coverage is sparse, filtering out text boxes that overlap existing AX elements (`IoU > 0.45`).
+   - **Capture & SoM Renderer**: Computes 64-bit perceptual `dHash` fingerprints to detect visual changes and draws `@eX` bounding box annotations onto screenshots when visual grounding is requested.
+   - **Snapshot Diff Engine**: Compares consecutive snapshots to return only added, removed, or value-mutated elements (`--diff`).
+4. **Layer 4 — Hybrid Action Execution Layer (`Action` + `Browser` + `Sandbox`)**
+   - Implements a **3-tier execution fallback strategy**:
+     - **Tier 1 (Zero-Focus Native AX)**: Invokes `AXPress`, `AXRaise`, or sets `kAXValueAttribute` directly on the target `AXUIElement`.
+     - **Tier 2 (Background PID Synthesis)**: Synthesizes window-local focus and dispatches `CGEvent` packets directly to the target process (`CGEvent.postToPid`), operating background apps without moving the physical cursor.
+     - **Tier 3 (Foreground Hardware Event)**: Falls back to screen-level `CGEvent` injection when an application ignores background events.
+   - Provides transactional clipboard text entry (saving and restoring existing `NSPasteboard` contents) for reliable CJK/emoji input.
+5. **Layer 5 — Companion Daemon & Visual Feedback Layer (`IPC` + `ComputerUseXApp`)**
+   - Because CLI/MCP calls can be short-lived processes, UI rendering and persistent state live in `ComputerUseX.app`.
+   - `cux` communicates with `ComputerUseX.app` over a low-latency Unix Domain Socket (`/tmp/cux-<uid>.sock`) to drive the virtual cursor overlay, keep the Live PiP background window preview alive across multi-step tasks, and display interactive permission prompts.
+
+---
+
+## 🧭 Extensibility & Future Architecture Roadmap
+
+`ComputerUseX` is designed with modular boundaries inside `Sources/OCUCore/` so the core perception and execution pipeline can be extended in the following directions:
+
+### 1. Cross-Platform OS Backends (Linux & Windows)
+The upper layers (MCP Server, CLI router, Snapshot Diff Engine, Reference Mapping, and Audit/Billing) operate on platform-agnostic `UIElementNode` and `SnapshotResult` structs. Future work abstracts OS-specific drivers behind protocol interfaces:
+- **macOS (Current)**: `AXUIElement` + Apple `Vision` + `CoreGraphics`.
+- **Linux (Planned)**: `AT-SPI2` accessibility bus + `X11` (`XTest` / `XComposite`) / `Wayland` (`wlr-screencopy` / `ydotool`) + ONNX/Tesseract OCR.
+- **Windows (Planned)**: Windows `UIAutomation` (`IUIAutomation`) + `WinRT GraphicsCapture` + `SendInput` / `Windows.Media.Ocr`.
+
+### 2. Pluggable Local VLM & Custom Grounding Providers
+For applications rendered entirely inside a GPU canvas (e.g., games, remote desktop viewers, custom Flutter/Skia surfaces) where neither `AXUIElement` nor text OCR captures icon semantics:
+- Introduce a `GroundingProvider` protocol in Layer 3 allowing external or local Apple Silicon MLX / CoreML UI detection models (such as OmniParser or UI-TARS) to plug directly into the `@e1..@eN` fusion pipeline alongside `AXEngine` and `VisionOCREngine`.
+
+### 3. Direct Chrome DevTools Protocol (CDP) & WebDriver BiDi Engine
+Currently `BrowserBridge` uses AppleScript/JXA for zero-config inspection of open browser windows. Extending `BrowserBridge` with an optional direct **CDP WebSocket client** will enable:
+- Full Accessibility Tree (`Accessibility.getFullAXTree`) and shadow-DOM inspection inside Chromium browsers.
+- Network request interception and console log streaming during Agent web workflows.
+
+### 4. Workflow Recording & Deterministic Replay (`cux record` / `cux replay`)
+By hooking into macOS event taps and Layer 3 snapshots, human actions can be recorded into semantic `cux batch` workflows (binding actions to resilient `@eX` role/title selectors rather than brittle `(x, y)` coordinates) and exported as reusable Agent Skills.
+
+### 5. Remote & VM Sandbox Execution Target (`cux --remote`)
+Because Layer 1–2 and Layer 3–5 communicate through structured command models and IPC payloads, `cux` can be extended to forward execution over SSH or gRPC to an isolated **macOS Virtualization.framework VM** (e.g., Tart), allowing Agents to run untrusted workflows inside a disposable virtual desktop while streaming the Live PiP preview back to the host.
+
+---
+
+## 📂 Project Structure
+
+```text
+ComputerUseX/
+├── Package.swift                       # Swift 6 package manifest (OCUCore, cux, ComputerUseXApp)
+├── Sources/
+│   ├── OCUCore/                        # Core engine library
+│   │   ├── Models/                     # UIElementNode, SnapshotResult, IPC & Audit models
+│   │   ├── AX/                         # macOS AXUIElement traversal & semantic pruning
+│   │   ├── OCR/                        # Apple Vision OCR & IoU deduplication
+│   │   ├── Capture/                    # Window capture, dHash & Set-of-Marks annotation
+│   │   ├── Perception/                 # Incremental snapshot diff engine
+│   │   ├── Action/                     # Multi-tier click/type/press/scroll/drag executor
+│   │   ├── Browser/                    # Chrome/Safari/Arc/Brave/Edge DOM & JS bridge
+│   │   ├── Sandbox/                    # Off-screen window parking & restoration
+│   │   ├── Safety/                     # App authorization guard, audit log & session billing
+│   │   ├── IPC/                        # Unix Domain Socket server & client (/tmp/cux-<uid>.sock)
+│   │   └── MCP/                        # stdio JSON-RPC 2.0 MCP Server (17 tools)
+│   ├── cux/                            # CLI & MCP executable entry point
+│   └── ComputerUseXApp/                # Companion macOS MenuBar app, Dashboard & Live PiP HUD
+├── plugins/codex/                      # Native OpenAI Codex plugin (.codex-plugin & marketplace)
+├── skills/computer-use-x/              # Agent Skill definition (SKILL.md)
+├── scripts/                            # Build (build-app.sh) & one-click installer (install.sh)
+└── Tests/OCUCoreTests/                 # Unit test suite
+```
+
+---
+
+## 🧪 Development & Testing
 
 ```bash
+# Build release binaries and package ComputerUseX.app
+./scripts/build-app.sh
+
+# Run unit tests
 swift test
 ```
 
