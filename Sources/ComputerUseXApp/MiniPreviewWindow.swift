@@ -27,6 +27,7 @@ public final class MiniPreviewViewModel: ObservableObject, @unchecked Sendable {
     @Published public var panelWidth: Double = 280.0
     @Published public var panelHeight: Double = 266.0
     @Published public var previewImage: NSImage? = nil
+    @Published public var wireframeElements: [UIElementRef] = []
 
     // Scaled cursor state in normalized window coordinates [0, 1]
     @Published public var showCursor: Bool = false
@@ -167,9 +168,16 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
         if lowerApp.contains("computerusex") || lowerApp.contains("opencomputeruse") { return }
         DispatchQueue.main.async {
             self.ensureWindowCreated()
+            if self.viewModel.targetWindowID != windowID {
+                self.viewModel.previewImage = nil
+                self.viewModel.wireframeElements = []
+            }
             self.viewModel.targetPid = pid
             self.viewModel.targetWindowID = windowID
             self.viewModel.appName = appName
+            if let snap = ElementSnapshotStore.shared.snapshot(forPid: pid), !snap.elements.isEmpty {
+                self.viewModel.wireframeElements = snap.elements
+            }
             if let title = windowTitle, !title.isEmpty {
                 self.viewModel.windowTitle = title
             }
@@ -179,9 +187,12 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             }
             let isFront = SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: windowID, pid: pid)
             self.viewModel.isBackgroundMode = !isFront
-            // Once a session preview is open (or when the target window is in background), keep it continuously visible
-            // throughout the entire Agent task session without flickering between steps!
-            if !isFront || self.viewModel.isVisible {
+            // When the target window is already at the top layer of its desktop/screen (`isFront == true`),
+            // suppress the redundant floating PiP thumbnail window and let the full-screen/window Takeover HUD
+            // and Virtual Cursor show directly on that window so the user knows not to touch it!
+            if isFront {
+                self.hidePreview()
+            } else {
                 self.showPreviewWindow()
                 self.triggerImmediateCapture()
             }
@@ -225,7 +236,9 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
                 pid: self.viewModel.targetPid
             )
             self.viewModel.isBackgroundMode = !isFront
-            if !isFront || self.viewModel.isVisible {
+            if isFront {
+                self.hidePreview()
+            } else {
                 self.showPreviewWindow()
                 self.triggerImmediateCapture()
             }
@@ -252,25 +265,8 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
     }
 
     public func showHighlight(rect: ScreenRect, label: String?) {
-        guard viewModel.isEnabled else { return }
-        DispatchQueue.main.async {
-            let b = self.viewModel.windowBounds
-            guard b.width > 10, b.height > 10 else { return }
-            let nx = max(0.0, min(1.0, (rect.x - b.x) / b.width))
-            let ny = max(0.0, min(1.0, (rect.y - b.y) / b.height))
-            let nw = max(0.02, min(1.0 - nx, rect.width / b.width))
-            let nh = max(0.02, min(1.0 - ny, rect.height / b.height))
-            withAnimation(.easeOut(duration: 0.15)) {
-                self.viewModel.highlightNormRect = CGRect(x: nx, y: ny, width: nw, height: nh)
-                self.viewModel.highlightLabel = label
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.1) { [weak self] in
-                withAnimation(.easeOut(duration: 0.2)) {
-                    self?.viewModel.highlightNormRect = nil
-                    self?.viewModel.highlightLabel = nil
-                }
-            }
-        }
+        self.viewModel.highlightNormRect = nil
+        self.viewModel.highlightLabel = nil
     }
 
     public func addClickRipple(at point: ScreenPoint) {
@@ -431,6 +427,20 @@ public final class MiniPreviewWindowController: @unchecked Sendable {
             defer { self?.isCapturingFrame = false }
             guard let self = self else { return }
             guard let captured = ScreenCaptureService.shared.captureWindowThumbnail(windowID: wid, maxDimension: 680) else {
+                let snap = ElementSnapshotStore.shared.snapshot(forPid: pid) ?? ElementSnapshotStore.shared.currentSnapshot()
+                let elements: [UIElementRef]
+                if let s = snap, s.activePid == pid, !s.elements.isEmpty {
+                    elements = s.elements
+                } else if pid > 0 {
+                    elements = AXScanner.shared.scanApplication(preferredWindowID: wid, updateLiveMap: false).elements
+                } else {
+                    elements = []
+                }
+                if !elements.isEmpty {
+                    DispatchQueue.main.async {
+                        self.viewModel.wireframeElements = elements
+                    }
+                }
                 return
             }
             let nsImage = NSImage(
@@ -480,6 +490,12 @@ struct MiniPreviewRootView: View {
                             .resizable()
                             .interpolation(.high)
                             .frame(width: w, height: h)
+                    } else if !viewModel.wireframeElements.isEmpty {
+                        MiniPreviewWireframeView(
+                            elements: viewModel.wireframeElements,
+                            windowBounds: viewModel.windowBounds,
+                            canvasSize: CGSize(width: w, height: h)
+                        )
                     } else {
                         GeminiPalette.canvasDeep
                         VStack(spacing: 7) {
@@ -506,24 +522,6 @@ struct MiniPreviewRootView: View {
                         .frame(height: 44)
                     }
                     .allowsHitTesting(false)
-
-                    // 2. Scaled Element Highlight inside Single Window (Gemini Aurora Frame)
-                    if let normRect = viewModel.highlightNormRect {
-                        let hx = normRect.origin.x * w
-                        let hy = normRect.origin.y * h
-                        let hw = max(10.0, normRect.size.width * w)
-                        let hh = max(8.0, normRect.size.height * h)
-
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .stroke(GeminiPalette.auroraGradient, lineWidth: 2.0)
-                            .background(
-                                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                    .fill(GeminiPalette.blue.opacity(0.16))
-                            )
-                            .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 5)
-                            .frame(width: hw, height: hh)
-                            .position(x: hx + hw / 2.0, y: hy + hh / 2.0)
-                    }
 
                     // 3. Scaled Click Ripples inside Single Window
                     ForEach(viewModel.ripples) { ripple in
@@ -673,5 +671,62 @@ struct MiniPreviewRippleView: View {
                 animate = true
             }
         }
+    }
+}
+
+/// Renders a live, proportional Accessibility UI Wireframe when macOS WindowServer suspends an off-Space window's GPU texture
+/// and no cached pixel frame exists yet, so the user can still visually see the app's layout, chat messages, and active input field.
+struct MiniPreviewWireframeView: View {
+    let elements: [UIElementRef]
+    let windowBounds: ScreenRect
+    let canvasSize: CGSize
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            GeminiPalette.canvasDeep
+            let winW = max(80.0, windowBounds.width)
+            let winH = max(80.0, windowBounds.height)
+            let w = max(1.0, canvasSize.width)
+            let h = max(1.0, canvasSize.height)
+
+            ForEach(Array(elements.prefix(90).enumerated()), id: \.offset) { _, el in
+                let nx = max(0.0, min(1.0, (el.frame.x - windowBounds.x) / winW))
+                let ny = max(0.0, min(1.0, (el.frame.y - windowBounds.y) / winH))
+                let nw = max(0.015, min(1.0 - nx, el.frame.width / winW))
+                let nh = max(0.015, min(1.0 - ny, el.frame.height / winH))
+                let rw = max(6.0, nw * w)
+                let rh = max(5.0, nh * h)
+                let isInput = (el.role == "textarea" || el.role == "textfield" || el.role == "searchfield")
+                let isButton = (el.role == "button")
+
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                        .fill(
+                            isInput
+                                ? GeminiPalette.blue.opacity(0.18)
+                                : (isButton ? Color.white.opacity(0.10) : Color.white.opacity(0.04))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 2.5, style: .continuous)
+                                .strokeBorder(
+                                    isInput
+                                        ? GeminiPalette.skyBlue.opacity(0.55)
+                                        : Color.white.opacity(isButton ? 0.24 : 0.11),
+                                    lineWidth: 0.6
+                                )
+                        )
+                    if rw >= 18 && rh >= 6 && !el.label.isEmpty && el.label != el.role {
+                        Text(el.label)
+                            .font(.system(size: max(5.5, min(7.5, rh * 0.55)), weight: isInput ? .semibold : .regular))
+                            .foregroundColor(.white.opacity(isInput ? 0.92 : 0.72))
+                            .lineLimit(1)
+                            .padding(.horizontal, 2)
+                    }
+                }
+                .frame(width: rw, height: rh)
+                .position(x: nx * w + rw / 2.0, y: ny * h + rh / 2.0)
+            }
+        }
+        .frame(width: canvasSize.width, height: canvasSize.height)
     }
 }

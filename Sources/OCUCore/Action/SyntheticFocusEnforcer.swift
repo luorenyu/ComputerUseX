@@ -165,19 +165,24 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         return false
     }
 
-    /// Returns true only if `windowID` is currently the active frontmost unoccluded window on its display.
-    /// When false, the target window is in the background or occluded, so cursor feedback should be shown inside
-    /// the Mini PiP Live Preview Window instead of cluttering the user's main desktop.
+    /// Returns true if `windowID` (or any main window of `pid` if `windowID == 0`) is currently on-screen
+    /// on the active Space and at the top layer of its desktop/display (not covered by another app's window).
+    /// Note: Ignores same-PID helper/overlay windows (such as Feishu's transparent `WatermarkWidget`) and
+    /// does NOT require `pid` to hold global keyboard focus (`frontmostApplication`), because on a multi-monitor
+    /// or side-by-side desktop setup the target window can already be completely visible at the top of its screen!
     public func isWindowFrontmostOnScreen(windowID: UInt32, pid: Int32) -> Bool {
-        guard windowID > 0 else { return false }
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == pid else {
-            return false
-        }
+        guard windowID > 0 || pid > 0 else { return false }
         guard let onScreenList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
             return false
         }
         let selfPid = ProcessInfo.processInfo.processIdentifier
-        for dict in onScreenList {
+
+        // 1. Locate the target window in `onScreenList` to verify it is on the current Space and get its bounds & Z-index
+        var targetIndex: Int? = nil
+        var targetBounds: ScreenRect? = nil
+        var resolvedPid: Int32 = pid
+
+        for (idx, dict) in onScreenList.enumerated() {
             guard let ownerPid = dict[kCGWindowOwnerPID as String] as? Int32,
                   ownerPid != selfPid,
                   let layer = dict[kCGWindowLayer as String] as? Int,
@@ -186,72 +191,145 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
                   let boundsDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
                 continue
             }
-            let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
-            let lowerOwner = ownerName.lowercased()
-            if lowerOwner.contains("computerusex") || lowerOwner.contains("opencomputeruse") { continue }
             let w = Double(boundsDict["Width"] ?? 0)
             let h = Double(boundsDict["Height"] ?? 0)
             guard w >= 80, h >= 80 else { continue }
-            // The first normal window for `pid` in on-screen z-order must be `windowID`
-            if ownerPid == pid {
-                return winNum == windowID
+
+            if windowID > 0 {
+                if winNum == windowID {
+                    targetIndex = idx
+                    targetBounds = ScreenRect(
+                        x: Double(boundsDict["X"] ?? 0),
+                        y: Double(boundsDict["Y"] ?? 0),
+                        width: w,
+                        height: h
+                    )
+                    if resolvedPid <= 0 { resolvedPid = ownerPid }
+                    break
+                }
+            } else if pid > 0 && ownerPid == pid {
+                targetIndex = idx
+                targetBounds = ScreenRect(
+                    x: Double(boundsDict["X"] ?? 0),
+                    y: Double(boundsDict["Y"] ?? 0),
+                    width: w,
+                    height: h
+                )
+                break
             }
         }
-        return false
+
+        // If the target window is not in `onScreenList`, it is minimized to Dock or on another Space
+        guard let foundIdx = targetIndex, let tBounds = targetBounds else {
+            return false
+        }
+        let targetArea = max(1.0, tBounds.width * tBounds.height)
+
+        // 2. Check all normal layer-0 windows ordered ABOVE `windowID` (`0 ..< foundIdx`).
+        // Ignore windows belonging to `ComputerUseX` or the same `resolvedPid` (e.g., Feishu's WatermarkWidget overlay).
+        // If another app's window above `windowID` significantly overlaps `tBounds` (> 8% of area or covers its center),
+        // then `windowID` is occluded/underneath another window. Otherwise it is at the top layer of its desktop!
+        for idx in 0..<foundIdx {
+            let dict = onScreenList[idx]
+            guard let ownerPid = dict[kCGWindowOwnerPID as String] as? Int32,
+                  ownerPid != selfPid,
+                  ownerPid != resolvedPid,
+                  let layer = dict[kCGWindowLayer as String] as? Int,
+                  layer == 0,
+                  let boundsDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
+                continue
+            }
+            if let alpha = dict[kCGWindowAlpha as String] as? Double, alpha <= 0.05 {
+                continue
+            }
+            let ownerName = (dict[kCGWindowOwnerName as String] as? String) ?? ""
+            let lowerOwner = ownerName.lowercased()
+            if lowerOwner.contains("computerusex") || lowerOwner.contains("opencomputeruse") { continue }
+
+            let rect = ScreenRect(
+                x: Double(boundsDict["X"] ?? 0),
+                y: Double(boundsDict["Y"] ?? 0),
+                width: Double(boundsDict["Width"] ?? 0),
+                height: Double(boundsDict["Height"] ?? 0)
+            )
+            guard rect.width >= 80, rect.height >= 80 else { continue }
+
+            let overlap = rect.intersectionArea(with: tBounds)
+            if overlap > targetArea * 0.08 || rect.contains(tBounds.center) {
+                return false
+            }
+        }
+        return true
     }
 
     private func windowUsesFlippedCoordinates(forPid pid: Int32) -> Bool {
-        let bundleId = NSRunningApplication(processIdentifier: pid)?.bundleIdentifier?.lowercased() ?? ""
-        if bundleId.contains("wechat") || bundleId.contains("xinwechat") {
-            return true
-        }
-        return false
+        // SkyLight's `CGEventSetWindowLocation` (`SLSEventSetWindowLocation`) uses top-down window-local
+        // coordinates (`localYTopDown = point.y - windowBounds.y`) across AppKit, Electron/Chromium (Feishu/Lark,
+        // VSCode, Chrome), and custom UIs (WeChat). Passing bottom-up Y mirrors clicks vertically.
+        return true
     }
 
     /// Sends synthetic `kCGEventAppKitDefined` (`type = 13`, `subtype = 1` ApplicationActivated) events directly
     /// to `pid` so the background application believes it is active and key-focused without stealing OS focus.
+    /// IMPORTANT: When the target window is on another macOS Space (`!isWindowOnCurrentSpace`), we NEVER send
+    /// `NSApplicationActivatedEventType` (`subtype = 1`), because Electron/AppKit responds by ordering its window
+    /// front and causing macOS WindowServer/Dock to switch Spaces to the target application!
     public func enforceBackgroundFocus(
         pid: Int32,
         windowID: UInt32,
         windowBounds: ScreenRect,
         activationPoint: ScreenPoint
     ) {
-        let uptime = ProcessInfo.processInfo.systemUptime
-        let flags = windowID != 0 ? NSEvent.ModifierFlags(rawValue: 0xc0000) : []
-
-        // 1. AppKitDefined subtype 1: NSApplicationActivatedEventType
-        if let activateNSEvent = NSEvent.otherEvent(
-            with: .appKitDefined,
-            location: .zero,
-            modifierFlags: flags,
-            timestamp: uptime,
-            windowNumber: Int(windowID),
-            context: nil,
-            subtype: 1,
-            data1: Int(windowID),
-            data2: 0
-        ), let cgActivate = activateNSEvent.cgEvent {
-            cgActivate.postToPid(pid)
+        let effWid = windowID != 0 ? windowID : (pinnedWindowID(forPid: pid) ?? 0)
+        let onCurrentSpace = SpaceFocusMonitor.shared.isWindowOnCurrentSpace(windowID: effWid, pid: pid)
+        guard onCurrentSpace else {
+            // Never post AppKitDefined subtype 1/4 to an off-Space window: Electron/Chromium will immediately
+            // order its window front and cause macOS WindowServer to switch Spaces away from the user!
+            return
         }
+        SpaceFocusMonitor.shared.traceSubStep(
+            "enforceBackgroundFocus",
+            targetPid: pid,
+            windowID: effWid,
+            details: "appKitDefined(subtype=1,4)"
+        ) {
+            let uptime = ProcessInfo.processInfo.systemUptime
+            let flags = effWid != 0 ? NSEvent.ModifierFlags(rawValue: 0xc0000) : []
 
-        // 2. AppKitDefined subtype 4: WindowKeyFocusReturned / WindowMoved notification
-        if let keyFocusNSEvent = NSEvent.otherEvent(
-            with: .appKitDefined,
-            location: .zero,
-            modifierFlags: [],
-            timestamp: uptime,
-            windowNumber: Int(windowID),
-            context: nil,
-            subtype: 4,
-            data1: Int(windowID),
-            data2: 1
-        ), let cgKeyFocus = keyFocusNSEvent.cgEvent {
-            cgKeyFocus.postToPid(pid)
+            // 1. AppKitDefined subtype 1: NSApplicationActivatedEventType
+            if let activateNSEvent = NSEvent.otherEvent(
+                with: .appKitDefined,
+                location: .zero,
+                modifierFlags: flags,
+                timestamp: uptime,
+                windowNumber: Int(effWid),
+                context: nil,
+                subtype: 1,
+                data1: Int(effWid),
+                data2: 0
+            ), let cgActivate = activateNSEvent.cgEvent {
+                cgActivate.postToPid(pid)
+            }
+
+            // 2. AppKitDefined subtype 4: WindowKeyFocusReturned / WindowMoved notification
+            if let keyFocusNSEvent = NSEvent.otherEvent(
+                with: .appKitDefined,
+                location: .zero,
+                modifierFlags: [],
+                timestamp: uptime,
+                windowNumber: Int(effWid),
+                context: nil,
+                subtype: 4,
+                data1: Int(effWid),
+                data2: 1
+            ), let cgKeyFocus = keyFocusNSEvent.cgEvent {
+                cgKeyFocus.postToPid(pid)
+            }
+
+            lock.lock()
+            activeStates[pid] = true
+            lock.unlock()
         }
-
-        lock.lock()
-        activeStates[pid] = true
-        lock.unlock()
     }
 
     /// Constructs a window-targeted `CGEvent` via `NSEvent.mouseEvent` (matching Codex `SynthesizedEvent.mouseEvent`)
@@ -346,52 +424,59 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         windowID: UInt32,
         windowBounds: ScreenRect
     ) {
-        let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
-            switch button {
-            case .left: return (.leftMouseDown, .leftMouseUp, .left)
-            case .right: return (.rightMouseDown, .rightMouseUp, .right)
-            case .center: return (.otherMouseDown, .otherMouseUp, .center)
+        SpaceFocusMonitor.shared.traceSubStep(
+            "performBackgroundClick",
+            targetPid: pid,
+            windowID: windowID,
+            details: "point=(\(Int(point.x)),\(Int(point.y)))"
+        ) {
+            let (downType, upType, cgButton): (CGEventType, CGEventType, CGMouseButton) = {
+                switch button {
+                case .left: return (.leftMouseDown, .leftMouseUp, .left)
+                case .right: return (.rightMouseDown, .rightMouseUp, .right)
+                case .center: return (.otherMouseDown, .otherMouseUp, .center)
+                }
+            }()
+
+            // Post window-targeted events directly to PID without touching .cghidEventTap or physical mouse cursor
+            enforceBackgroundFocus(
+                pid: pid,
+                windowID: windowID,
+                windowBounds: windowBounds,
+                activationPoint: point
+            )
+
+            postSynthesizedMouseEvent(
+                type: .mouseMoved,
+                button: .left,
+                at: point,
+                clickCount: 0,
+                pid: pid,
+                windowID: windowID,
+                windowBounds: windowBounds
+            )
+
+            for i in 1...max(1, clickCount) {
+                postSynthesizedMouseEvent(
+                    type: downType,
+                    button: cgButton,
+                    at: point,
+                    clickCount: i,
+                    pid: pid,
+                    windowID: windowID,
+                    windowBounds: windowBounds
+                )
+                Thread.sleep(forTimeInterval: 0.015)
+                postSynthesizedMouseEvent(
+                    type: upType,
+                    button: cgButton,
+                    at: point,
+                    clickCount: i,
+                    pid: pid,
+                    windowID: windowID,
+                    windowBounds: windowBounds
+                )
             }
-        }()
-
-        // Post window-targeted events directly to PID without touching .cghidEventTap or physical mouse cursor
-        enforceBackgroundFocus(
-            pid: pid,
-            windowID: windowID,
-            windowBounds: windowBounds,
-            activationPoint: point
-        )
-
-        postSynthesizedMouseEvent(
-            type: .mouseMoved,
-            button: .left,
-            at: point,
-            clickCount: 0,
-            pid: pid,
-            windowID: windowID,
-            windowBounds: windowBounds
-        )
-
-        for i in 1...max(1, clickCount) {
-            postSynthesizedMouseEvent(
-                type: downType,
-                button: cgButton,
-                at: point,
-                clickCount: i,
-                pid: pid,
-                windowID: windowID,
-                windowBounds: windowBounds
-            )
-            Thread.sleep(forTimeInterval: 0.015)
-            postSynthesizedMouseEvent(
-                type: upType,
-                button: cgButton,
-                at: point,
-                clickCount: i,
-                pid: pid,
-                windowID: windowID,
-                windowBounds: windowBounds
-            )
         }
     }
 
@@ -436,12 +521,60 @@ public final class SyntheticFocusEnforcer: @unchecked Sendable {
         scrollEvent.postToPid(pid)
     }
 
-    /// Posts a key press (`keyCode` + modifier `flags`) directly to `pid`.
+    /// Posts a key press (`keyCode` + modifier `flags`) directly to `pid` (including across macOS Spaces).
     public func postSynthesizedKeyCode(
         _ keyCode: CGKeyCode,
         flags: CGEventFlags = [],
         toPid pid: Int32
     ) {
+        let wid = Int(pinnedWindowID(forPid: pid) ?? 0)
+        if wid > 0 {
+            enforceBackgroundFocus(
+                pid: pid,
+                windowID: UInt32(wid),
+                windowBounds: ScreenRect(x: 0, y: 0, width: 0, height: 0),
+                activationPoint: ScreenPoint(x: 0, y: 0)
+            )
+        }
+        let charMap: [CGKeyCode: String] = [
+            36: "\r", 48: "\t", 49: " ", 51: "\u{8}", 53: "\u{1b}",
+            0: "a", 8: "c", 9: "v", 7: "x", 6: "z"
+        ]
+        if let ch = charMap[keyCode] {
+            let uptime = ProcessInfo.processInfo.systemUptime
+            let nsFlags = NSEvent.ModifierFlags(rawValue: UInt(flags.rawValue))
+            if let kd = NSEvent.keyEvent(
+                with: .keyDown,
+                location: .zero,
+                modifierFlags: nsFlags,
+                timestamp: uptime,
+                windowNumber: wid,
+                context: nil,
+                characters: ch,
+                charactersIgnoringModifiers: ch,
+                isARepeat: false,
+                keyCode: keyCode
+            )?.cgEvent,
+            let ku = NSEvent.keyEvent(
+                with: .keyUp,
+                location: .zero,
+                modifierFlags: nsFlags,
+                timestamp: uptime,
+                windowNumber: wid,
+                context: nil,
+                characters: ch,
+                charactersIgnoringModifiers: ch,
+                isARepeat: false,
+                keyCode: keyCode
+            )?.cgEvent {
+                kd.flags = flags
+                ku.flags = flags
+                kd.postToPid(pid)
+                Thread.sleep(forTimeInterval: 0.025)
+                ku.postToPid(pid)
+                return
+            }
+        }
         guard let down = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: true),
               let up = CGEvent(keyboardEventSource: nil, virtualKey: keyCode, keyDown: false) else {
             return

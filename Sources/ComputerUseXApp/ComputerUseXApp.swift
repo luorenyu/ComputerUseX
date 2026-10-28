@@ -22,7 +22,22 @@ public final class DaemonAppCoordinator: ObservableObject, @unchecked Sendable {
         refreshPermissions()
     }
 
+    /// Ensures only a single `ComputerUseXApp` menu bar daemon is ever active at once,
+    /// terminating any stale/duplicate `ComputerUseXApp` instances before registering the StatusBar icon and IPC socket.
+    private func terminateOlderDuplicateInstances() {
+        let myPid = ProcessInfo.processInfo.processIdentifier
+        for app in NSWorkspace.shared.runningApplications {
+            guard app.processIdentifier != myPid else { continue }
+            let isMatchingExec = app.executableURL?.lastPathComponent == "ComputerUseXApp"
+            let isMatchingBundle = app.bundleIdentifier == "org.computerusex.app" && app.executableURL?.lastPathComponent != "cux"
+            if isMatchingExec || isMatchingBundle {
+                _ = app.forceTerminate()
+            }
+        }
+    }
+
     public func startServices() {
+        terminateOlderDuplicateInstances()
         OverlayHUDWindowController.shared.setupOverlayWindow()
         VirtualCursorWindowController.shared.ensureWindowCreated()
         MiniPreviewWindowController.shared.ensureWindowCreated()

@@ -8,6 +8,62 @@ import UniformTypeIdentifiers
 public final class ScreenCaptureService: @unchecked Sendable {
     public static let shared = ScreenCaptureService()
 
+    private let cacheLock = NSLock()
+    private var lastValidThumbnails: [UInt32: (image: CGImage, bounds: ScreenRect)] = [:]
+    private var lastDiskCacheWriteTime: [UInt32: Date] = [:]
+    private var sckCircuitBreakerTripped: Bool = false
+    private let diskCacheQueue = DispatchQueue(label: "org.computerusex.pip.diskcache", qos: .utility)
+
+    private var pipCacheDirectory: URL {
+        let dir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".computerusex/pip_cache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        return dir
+    }
+
+    private func persistThumbnailToDisk(windowID: UInt32, image: CGImage, bounds: ScreenRect) {
+        let now = Date()
+        let shouldWrite = cacheLock.withLock { () -> Bool in
+            if let last = lastDiskCacheWriteTime[windowID], now.timeIntervalSince(last) < 2.5 {
+                return false
+            }
+            lastDiskCacheWriteTime[windowID] = now
+            return true
+        }
+        guard shouldWrite else { return }
+        let dir = pipCacheDirectory
+        diskCacheQueue.async { [weak self] in
+            guard let self = self else { return }
+            let pngPath = dir.appendingPathComponent("win_\(windowID).png").path
+            let metaURL = dir.appendingPathComponent("win_\(windowID).json")
+            try? self.savePNG(image, to: pngPath)
+            if let data = try? JSONEncoder().encode(bounds) {
+                try? data.write(to: metaURL, options: .atomic)
+            }
+        }
+    }
+
+    private func loadThumbnailFromDisk(windowID: UInt32, fallbackBounds: ScreenRect) -> (image: CGImage, bounds: ScreenRect)? {
+        let dir = pipCacheDirectory
+        let pngURL = dir.appendingPathComponent("win_\(windowID).png")
+        let metaURL = dir.appendingPathComponent("win_\(windowID).json")
+        guard FileManager.default.fileExists(atPath: pngURL.path),
+              let src = CGImageSourceCreateWithURL(pngURL as CFURL, nil),
+              let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else {
+            return nil
+        }
+        var bounds = fallbackBounds
+        if let data = try? Data(contentsOf: metaURL),
+           let decoded = try? JSONDecoder().decode(ScreenRect.self, from: data),
+           decoded.width >= 60, decoded.height >= 60 {
+            bounds = decoded
+        }
+        cacheLock.withLock {
+            lastValidThumbnails[windowID] = (img, bounds)
+        }
+        return (img, bounds)
+    }
+
     private init() {}
 
     /// Captures the target application window (when `windowOnly` is true and `pid`/`targetRect` are known)
@@ -18,6 +74,16 @@ public final class ScreenCaptureService: @unchecked Sendable {
         preferredWindowID: UInt32? = nil,
         windowOnly: Bool = true
     ) throws -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double) {
+        // Silent preflight check: NEVER call SCShareableContent or /usr/sbin/screencapture when Screen Recording
+        // TCC permission is missing or invalidated by a code-signature change, because doing so pops up macOS's
+        // modal permission dialog on every call!
+        guard CGPreflightScreenCaptureAccess() else {
+            throw OCUError(
+                code: .captureFailed,
+                message: "Screen Recording permission is not active for this binary signature.",
+                recoveryHint: "Accessibility (AX) mode continues to work without Screen Recording."
+            )
+        }
         let targetPoint = targetRect?.center ?? PermissionManager.shared.mainScreenBounds().center
         let displayInfo = PermissionManager.shared.displayContaining(point: targetPoint)
 
@@ -32,6 +98,27 @@ public final class ScreenCaptureService: @unchecked Sendable {
             scale: displayInfo.scale
         ) {
             return scResult
+        }
+
+        if cacheLock.withLock({ sckCircuitBreakerTripped }) {
+            throw OCUError(
+                code: .captureFailed,
+                message: "ScreenCaptureKit circuit breaker tripped due to TCC signature change.",
+                recoveryHint: "Accessibility (AX) mode continues to work without Screen Recording."
+            )
+        }
+
+        if windowOnly, let targetPid = pid, targetPid > 0 {
+            let isOnCurrentSpace = AppWorkspaceController.shared.listRunningApps()
+                .first(where: { $0.pid == targetPid })?
+                .windows.contains(where: \.isOnScreen) ?? false
+            if !isOnCurrentSpace {
+                throw OCUError(
+                    code: .captureFailed,
+                    message: "Target window (pid=\(targetPid)) is on another macOS Space and its GPU surface is suspended.",
+                    recoveryHint: "Accessibility (AX) tree remains available across Spaces."
+                )
+            }
         }
 
         // 2. Fallback to /usr/sbin/screencapture -D <index>
@@ -76,13 +163,37 @@ public final class ScreenCaptureService: @unchecked Sendable {
         maxDimension: Int = 640
     ) -> (image: CGImage, bounds: ScreenRect)? {
         guard windowID > 0 else { return nil }
+        let isBreakerTripped = cacheLock.withLock { sckCircuitBreakerTripped }
+        let isOnCurrSpace = SpaceFocusMonitor.shared.isWindowOnCurrentSpace(windowID: windowID)
+        // Silent preflight + off-Space + circuit-breaker check:
+        // 1. If Screen Recording TCC is not active (`!CGPreflightScreenCaptureAccess()`), or
+        // 2. If `SCShareableContent` previously threw a TCC error (`isBreakerTripped`), or
+        // 3. If the target window is on another Space (`!isOnCurrSpace`, where macOS suspends the GPU surface),
+        // immediately serve the cached/disk thumbnail without calling `SCShareableContent`!
+        if isBreakerTripped || !CGPreflightScreenCaptureAccess() || !isOnCurrSpace {
+            if let cached = cacheLock.withLock({ lastValidThumbnails[windowID] }) {
+                return cached
+            }
+            return loadThumbnailFromDisk(
+                windowID: windowID,
+                fallbackBounds: ScreenRect(x: 0, y: 0, width: 1200, height: 800)
+            )
+        }
         let semaphore = DispatchSemaphore(value: 0)
         var result: (CGImage, ScreenRect)? = nil
 
         Task.detached {
             defer { semaphore.signal() }
-            guard let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
-                  let scWin = content.windows.first(where: { $0.windowID == windowID }) else {
+            let content: SCShareableContent
+            do {
+                content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+            } catch {
+                self.cacheLock.withLock {
+                    self.sckCircuitBreakerTripped = true
+                }
+                return
+            }
+            guard let scWin = content.windows.first(where: { $0.windowID == windowID }) else {
                 return
             }
             let winRect = ScreenRect(scWin.frame)
@@ -123,29 +234,23 @@ public final class ScreenCaptureService: @unchecked Sendable {
 
                 if let img = try? await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config),
                    !self.isImageBlankOrBlack(img) {
+                    self.cacheLock.withLock {
+                        self.lastValidThumbnails[windowID] = (img, cRect)
+                    }
+                    self.persistThumbnailToDisk(windowID: windowID, image: img, bounds: cRect)
                     result = (img, cRect)
                     return
                 }
             }
 
-            // Fallback if desktopIndependentWindow returned a blank backing surface:
-            // capture the display containing scWin and crop strictly to winRect (single window only!)
-            if let scDisplay = content.displays.first(where: { ScreenRect($0.frame).intersectionArea(with: winRect) > 0 }) ?? content.displays.first {
-                let displayRect = ScreenRect(scDisplay.frame)
-                let excludedApps = content.applications.filter {
-                    $0.bundleIdentifier == "org.computerusex.app" || $0.bundleIdentifier == "org.opencomputeruse.app"
-                }
-                let dispFilter = SCContentFilter(display: scDisplay, excludingApplications: excludedApps, exceptingWindows: [])
-                let dispConfig = SCStreamConfiguration()
-                dispConfig.width = scDisplay.width
-                dispConfig.height = scDisplay.height
-                dispConfig.showsCursor = false
-                if let dispImg = try? await SCScreenshotManager.captureImage(contentFilter: dispFilter, configuration: dispConfig) {
-                    let actualScale = displayRect.width > 0 ? Double(dispImg.width) / displayRect.width : 1.0
-                    if let cropped = self.cropImage(dispImg, to: winRect, displayBounds: displayRect, scale: actualScale) {
-                        result = (cropped, winRect)
-                    }
-                }
+            // Never capture `scDisplay` when the target window is on another Space or occluded behind another app
+            // (which would falsely display the user's current foreground app, e.g. Antigravity, inside the PiP preview!).
+            // Instead, return the last valid cached thumbnail if macOS WindowServer suspended the off-Space GPU surface.
+            let cached = self.cacheLock.withLock { self.lastValidThumbnails[windowID] }
+            if let cached = cached {
+                result = cached
+            } else if let diskCached = self.loadThumbnailFromDisk(windowID: windowID, fallbackBounds: winRect) {
+                result = diskCached
             }
         }
 
@@ -162,6 +267,8 @@ public final class ScreenCaptureService: @unchecked Sendable {
         fallbackBounds: ScreenRect,
         scale: Double
     ) -> (image: CGImage, logicalBounds: ScreenRect, scaleFactor: Double)? {
+        let isBreakerTripped = cacheLock.withLock { sckCircuitBreakerTripped }
+        guard !isBreakerTripped && CGPreflightScreenCaptureAccess() else { return nil }
         let semaphore = DispatchSemaphore(value: 0)
         var captured: CGImage? = nil
         var resolvedBounds = fallbackBounds
@@ -227,11 +334,20 @@ public final class ScreenCaptureService: @unchecked Sendable {
                                 contentFilter: winFilter,
                                 configuration: winConfig
                             ), !self.isImageBlankOrBlack(winImg) {
+                                self.cacheLock.withLock {
+                                    self.lastValidThumbnails[scWin.windowID] = (winImg, winRect)
+                                }
+                                self.persistThumbnailToDisk(windowID: scWin.windowID, image: winImg, bounds: winRect)
                                 captured = winImg
                                 resolvedBounds = winRect
                                 resolvedScale = winRect.width > 0 ? Double(winImg.width) / winRect.width : scale
                                 return
                             }
+                        }
+                        // If the target window is on another Space (`!scWin.isOnScreen`), never fall through to
+                        // capturing `scDisplay` (which would capture the user's current Space instead of the target app!).
+                        if !scWin.isOnScreen {
+                            return
                         }
                     }
                 }
@@ -274,6 +390,9 @@ public final class ScreenCaptureService: @unchecked Sendable {
                     resolvedScale = actualScale
                 }
             } catch {
+                self.cacheLock.withLock {
+                    self.sckCircuitBreakerTripped = true
+                }
                 return
             }
         }
@@ -283,7 +402,8 @@ public final class ScreenCaptureService: @unchecked Sendable {
         return (finalImage, resolvedBounds, resolvedScale)
     }
 
-    /// Detects whether a captured CGImage is completely blank/black (e.g. an uncomposited shell window).
+    /// Detects whether a captured CGImage is completely blank/black or a uniform solid-color shell window
+    /// (e.g. an uncomposited Electron white backing window when suspended on another macOS Space).
     private func isImageBlankOrBlack(_ image: CGImage) -> Bool {
         let w = image.width
         let h = image.height
@@ -305,19 +425,34 @@ public final class ScreenCaptureService: @unchecked Sendable {
         ctx.interpolationQuality = .low
         ctx.draw(image, in: CGRect(x: 0, y: 0, width: sampleSize, height: sampleSize))
         var nonBlackCount = 0
-        for i in stride(from: 0, to: pixels.count, by: 4) {
-            let r = pixels[i]
-            let g = pixels[i + 1]
-            let b = pixels[i + 2]
-            let a = pixels[i + 3]
-            if a > 10 && (r > 8 || g > 8 || b > 8) {
-                nonBlackCount += 1
-                if nonBlackCount >= 3 {
-                    return false
+        var minLum = 255
+        var maxLum = 0
+        // Check interior 12x12 grid (ignoring 2px rounded-corner shadow border) for uniform solid white/gray shell
+        for y in 2..<14 {
+            for x in 2..<14 {
+                let i = (y * sampleSize + x) * 4
+                let r = Int(pixels[i])
+                let g = Int(pixels[i + 1])
+                let b = Int(pixels[i + 2])
+                let a = Int(pixels[i + 3])
+                if a > 10 && (r > 8 || g > 8 || b > 8) {
+                    nonBlackCount += 1
+                }
+                if a > 200 {
+                    let lum = (r + g + b) / 3
+                    if lum < minLum { minLum = lum }
+                    if lum > maxLum { maxLum = lum }
                 }
             }
         }
-        return true
+        if nonBlackCount < 3 {
+            return true
+        }
+        // If the entire interior is uniform solid color (variance <= 3, e.g. solid white 255), it is an unrendered shell
+        if maxLum >= minLum && (maxLum - minLum) <= 3 {
+            return true
+        }
+        return false
     }
 
     private func cropImage(

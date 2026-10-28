@@ -180,7 +180,11 @@ public struct SnapshotResult: Codable, Equatable, Sendable {
         for el in elements {
             let cx = Int(el.centerPoint.x.rounded())
             let cy = Int(el.centerPoint.y.rounded())
-            let valPart = (el.value != nil && !el.value!.isEmpty && el.value != el.label) ? "=\(el.value!)" : ""
+            let valPart: String = {
+                guard let v = el.value, !v.isEmpty, v != el.label else { return "" }
+                let clipped = v.count <= 240 ? v : String(v.prefix(240)) + "..."
+                return "=\(clipped)"
+            }()
             lines.append("\(el.ref)|\(el.source.rawValue)|\(el.role)|\(cx),\(cy)|\(el.label)\(valPart)")
         }
         return lines.joined(separator: "\n")

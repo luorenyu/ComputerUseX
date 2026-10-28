@@ -182,9 +182,9 @@ flowchart TB
 | 架构分层 | 核心模块 | 源码目录 | 核心职责说明 |
 | :--- | :--- | :--- | :--- |
 | **第一层：协议与客户端接入层** | `MCPServer`<br/>`cux` CLI<br/>`Plugins & Skills` | `Sources/OCUCore/MCP/`<br/>`Sources/cux/`<br/>`plugins/codex/` | 解析 MCP (`stdio` JSON-RPC 2.0) 与 CLI 子命令请求；提供 OpenAI Codex 原生插件与通用 Skill 定义。 |
-| **第二层：会话治理与安全审计层** | `AuditAndSecurityGuard`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | 拦截未授权应用访问并触发弹窗授权；检测 `SecureEventInput` 与密码框防止敏感输入泄露；维护跨调用 `@e1..@eN` 映射表与 `~/.computerusex/` 审计统计。 |
-| **第三层：核心感知与动作引擎层** | **感知**：`AXEngine` / `VisionOCR` / `Capture` / `Diff`<br/>**执行**：`ActionExecutor` / `BrowserBridge` / `Sandbox` | `Sources/OCUCore/AX/`<br/>`Sources/OCUCore/OCR/`<br/>`Sources/OCUCore/Capture/`<br/>`Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Browser/`<br/>`Sources/OCUCore/Sandbox/` | **多模态感知**：遍历 `AXUIElement` 树 + Apple `Vision` 端侧 OCR（`IoU > 0.45` 去重融合）+ `dHash` 指纹 + SoM 标注 + `--diff` 增量对比。<br/>**三级动作执行**：Tier 1 原生 `AXPress`/`AXValue` → Tier 2 后台进程级 `CGEvent.postToPid` → Tier 3 硬件 `CGEvent` 兜底；含浏览器免焦点 DOM/JS 桥接与窗口边缘沙箱。 |
-| **第四层：守护进程与系统适配层** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | 通过 `/tmp/cux-<uid>.sock` 连接无状态 CLI 与常驻 `ComputerUseX.app`，承载「电脑操控中心」主面板、右下角后台窗口实时画中画（PiP）预览流及桌面操作指示层。 |
+| **第二层：会话治理与安全审计层** | `AuditAndSecurityGuard`<br/>`SessionBillingManager`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | 拦截未授权应用访问并触发弹窗授权；检测 `SecureEventInput` 与密码框防止敏感输入泄露；基于客户端 `KERN_PROCARGS2` 进程树实时识别当前调用方 Agent 与模型；维护跨调用 `@e1..@eN` 映射表与 `~/.computerusex/` 审计统计。 |
+| **第三层：核心感知与动作引擎层** | **感知**：`AXScanner` / `VisionOCRScanner` / `ScreenCaptureService` / `ElementSnapshotStore`<br/>**执行**：`MouseController` / `KeyboardController` / `AppWorkspaceController` / `BrowserBridgeController` / `SyntheticFocusEnforcer` | `Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Permissions/` | **多模态感知**：遍历 `AXUIElement` 树（支持跨桌面 Remote Token 发现与 Chromium/Electron 界面缩放坐标自动校准）+ Apple `Vision` 端侧 OCR（`IoU > 0.45` 去重融合）+ `dHash` 指纹 + SoM 标注 + 动作后增量 Diff。<br/>**三级动作执行**：Tier 1 原生 `AXPress`/`AXValue` → Tier 2 后台进程级 `CGEvent.postToPid` → Tier 3 硬件 `CGEvent` 兜底；支持多屏/跨桌面就地免打扰操控、富文本编辑器激活、浏览器免焦点 DOM/JS 桥接与窗口边缘沙箱。 |
+| **第四层：守护进程与系统适配层** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | 通过 `/tmp/cux-<uid>.sock` 连接无状态 CLI 与常驻 `ComputerUseX.app`，承载「电脑操控中心」主面板、智能后台实时画中画（PiP）预览流（当目标窗口已位于屏幕最顶层时自动隐藏小窗，直接在原窗口呈现指针操控）及桌面操作指示层。 |
 
 ---
 
@@ -222,19 +222,15 @@ ComputerUseX/
 ├── Package.swift                       # Swift 6 包配置 (OCUCore, cux, ComputerUseXApp)
 ├── Sources/
 │   ├── OCUCore/                        # 核心引擎库
-│   │   ├── Models/                     # UIElementNode, SnapshotResult, IPC 与审计数据模型
-│   │   ├── AX/                         # macOS AXUIElement 遍历与语义过滤
-│   │   ├── OCR/                        # Apple Vision 端侧 OCR 与 IoU 去重融合
-│   │   ├── Capture/                    # 窗口级截图、dHash 感知哈希与 SoM 视觉标注渲染
-│   │   ├── Perception/                 # 增量快照 Diff 引擎
-│   │   ├── Action/                     # 三级混合点击/输入/按键/滚动/拖拽执行器
-│   │   ├── Browser/                    # Chrome/Safari/Arc/Brave/Edge DOM 与 JS 桥接
-│   │   ├── Sandbox/                    # 后台窗口边缘停靠与恢复管理
-│   │   ├── Safety/                     # 应用权限拦截、密码框保护、审计日志与统计
-│   │   ├── IPC/                        # Unix Domain Socket 通信服务端与客户端
+│   │   ├── Models/                     # UIElementRef, SnapshotResult, IPC 与审计数据模型
+│   │   ├── Perception/                 # AXScanner, VisionOCRScanner, ScreenCaptureService, ElementSnapshotStore, SoMAnnotator
+│   │   ├── Action/                     # MouseController, KeyboardController, AppWorkspaceController, BrowserBridgeController, SyntheticFocusEnforcer
+│   │   ├── Permissions/                # PermissionManager 与多显示器几何探测
+│   │   ├── Safety/                     # AuditAndSecurityGuard, KillSwitchMonitor 与 SessionBillingManager
+│   │   ├── IPC/                        # UnixSocketIPC 与 OCUCommandExecutor (/tmp/cux-<uid>.sock)
 │   │   └── MCP/                        # stdio JSON-RPC 2.0 MCP Server (17 个工具)
 │   ├── cux/                            # CLI 与 MCP 命令行程序入口
-│   └── ComputerUseXApp/                # macOS 状态栏守护进程、电脑操控中心与实时画中画预览
+│   └── ComputerUseXApp/                # macOS 状态栏守护进程、电脑操控中心、虚拟指针与实时画中画预览
 ├── plugins/codex/                      # OpenAI Codex 原生插件包 (.codex-plugin & marketplace)
 ├── skills/computer-use-x/              # Agent Skill 技能定义 (SKILL.md)
 ├── scripts/                            # 应用打包脚本 (build-app.sh) 与一键安装脚本 (install.sh)

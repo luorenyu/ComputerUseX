@@ -55,11 +55,20 @@ public final class AppWorkspaceController: @unchecked Sendable {
             // WITHOUT calling `running.activate()` or `kAXRaiseAction` (which would steal the user's window/input focus
             // or pop minimized windows onto the desktop).
             if MouseController.shared.useVirtualCursorByDefault {
-                let scan = AXScanner.shared.scanApplication(
+                var scan = AXScanner.shared.scanApplication(
                     appNameFilter: name,
                     maxDepth: 10,
                     maxElements: 40
                 )
+                if !hasOnScreenWindow(pid: pid) || scan.windowFrame == nil {
+                    if reopenAppWindowIfNeeded(pid: pid, appName: name, preserveUserFocus: true) {
+                        scan = AXScanner.shared.scanApplication(
+                            appNameFilter: name,
+                            maxDepth: 10,
+                            maxElements: 40
+                        )
+                    }
+                }
                 let wid = scan.windowID ?? UInt32(listRunningApps().first(where: { $0.pid == pid })?.windows.first?.windowId ?? 0)
                 let bounds = scan.windowFrame ?? listRunningApps().first(where: { $0.pid == pid })?.windows.first?.frame ?? PermissionManager.shared.mainScreenBounds()
                 if wid > 0 {
@@ -130,6 +139,7 @@ public final class AppWorkspaceController: @unchecked Sendable {
         }
 
         // Launch via `/usr/bin/open` (use `-g` in background mode so launching never steals foreground focus)
+        let userFrontApp = workspace.frontmostApplication
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         let bgFlags = MouseController.shared.useVirtualCursorByDefault ? ["-g"] : []
@@ -149,13 +159,101 @@ public final class AppWorkspaceController: @unchecked Sendable {
             )
         }
 
-        Thread.sleep(forTimeInterval: 0.35)
-        KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🚀 已启动应用: \(identifierOrName)", subtitle: nil))
+        if MouseController.shared.useVirtualCursorByDefault {
+            for _ in 0..<10 {
+                Thread.sleep(forTimeInterval: 0.15)
+                if let launched = workspace.runningApplications.first(where: { app in
+                    (app.localizedName?.lowercased() == lower) ||
+                    (app.bundleIdentifier?.lowercased() == lower) ||
+                    (app.localizedName?.lowercased().contains(lower) == true)
+                }), hasOnScreenWindow(pid: launched.processIdentifier) {
+                    VirtualDisplayManager.shared.tuckWindowUnderFrontmost(pid: launched.processIdentifier)
+                    break
+                }
+            }
+            if let front = userFrontApp, workspace.frontmostApplication?.processIdentifier != front.processIdentifier {
+                front.activate()
+            }
+        } else {
+            Thread.sleep(forTimeInterval: 0.35)
+        }
+        KillSwitchMonitor.shared.emitHUDEvent(.statusPill(title: "🚀 已后台唤起应用: \(identifierOrName)", subtitle: nil))
         return ActionOutcome(
             action: "launch_app",
             targetDescription: identifierOrName,
             elapsedMs: Int(Date().timeIntervalSince(startTime) * 1000)
         )
+    }
+
+    public func hasOnScreenWindow(pid: Int32) -> Bool {
+        guard pid > 0 else { return false }
+        if VirtualDisplayManager.shared.isAppMinimizedOrHidden(pid: pid) {
+            return false
+        }
+        let axApp = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(axApp, 0.4)
+        var winsRef: CFTypeRef?
+        if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &winsRef) == .success,
+           let wins = winsRef as? [AXUIElement] {
+            let unminimized = wins.filter { w in
+                var titleRef: CFTypeRef?
+                AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &titleRef)
+                if let t = titleRef as? String, t.lowercased().contains("watermark") {
+                    return false
+                }
+                var minRef: CFTypeRef?
+                if AXUIElementCopyAttributeValue(w, kAXMinimizedAttribute as CFString, &minRef) == .success,
+                   let isMin = minRef as? Bool {
+                    return !isMin
+                }
+                return true
+            }
+            if !unminimized.isEmpty {
+                return true
+            }
+        }
+        return !(currentWindowsByPID()[pid] ?? []).isEmpty
+    }
+
+    /// Ensures a running application that currently has 0 open windows across all Spaces (e.g. closed to Dock/tray via Cmd+W or minimized)
+    /// reopens or unminimizes its primary window in the background and tucks it underneath the user's active foreground window (e.g. `Antigravity`).
+    @discardableResult
+    public func reopenAppWindowIfNeeded(
+        pid: Int32,
+        appName: String,
+        preserveUserFocus: Bool = true
+    ) -> Bool {
+        guard pid > 0 else { return false }
+        if VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: pid) {
+            return true
+        }
+        if hasOnScreenWindow(pid: pid) {
+            return true
+        }
+
+        // Only launch/reopen with `-g` (background, no foreground activation, no Space switch)
+        let running = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        let bgFlags = preserveUserFocus ? ["-g"] : []
+        if let bundleId = running?.bundleIdentifier, !bundleId.isEmpty {
+            proc.arguments = bgFlags + ["-b", bundleId]
+        } else {
+            proc.arguments = bgFlags + ["-a", appName]
+        }
+        try? proc.run()
+        proc.waitUntilExit()
+
+        for _ in 0..<6 {
+            Thread.sleep(forTimeInterval: 0.14)
+            if hasOnScreenWindow(pid: pid) {
+                if preserveUserFocus {
+                    VirtualDisplayManager.shared.tuckWindowUnderFrontmost(pid: pid)
+                }
+                return true
+            }
+        }
+        return false
     }
 
     public func setFocusedWindowFrame(appName: String? = nil, rect: ScreenRect) throws -> ActionOutcome {
@@ -299,24 +397,42 @@ public final class AppWorkspaceController: @unchecked Sendable {
 
     private func currentWindowsByPID() -> [Int32: [WindowInfo]] {
         var result: [Int32: [WindowInfo]] = [:]
-        guard let infoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
-            return result
+        let onScreenList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        let allList = (CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? onScreenList
+
+        var onScreenIDs = Set<Int>()
+        for dict in onScreenList {
+            if let winId = dict[kCGWindowNumber as String] as? Int {
+                onScreenIDs.insert(winId)
+            }
         }
 
-        for dict in infoList {
+        var seenIDs = Set<Int>()
+        // 1. Add all windows on the current Space first, then windows on other Spaces (so cross-Space apps are never mistaken for closed)
+        for dict in (onScreenList + allList) {
             guard let pid = dict[kCGWindowOwnerPID as String] as? Int32,
                   let layer = dict[kCGWindowLayer as String] as? Int,
                   layer == 0,
+                  let winId = dict[kCGWindowNumber as String] as? Int,
+                  !seenIDs.contains(winId),
                   let boundsDict = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
                 continue
             }
+            let alpha = (dict[kCGWindowAlpha as String] as? Double) ?? 1.0
+            guard alpha > 0.01 else { continue }
             let x = Double(boundsDict["X"] ?? 0)
             let y = Double(boundsDict["Y"] ?? 0)
             let w = Double(boundsDict["Width"] ?? 0)
             let h = Double(boundsDict["Height"] ?? 0)
-            guard w >= 40 && h >= 40 else { continue }
+            let isOnCurrentSpace = onScreenIDs.contains(winId)
+            // For off-Space windows (.optionAll), require standard main-window dimensions (>= 200x160) to ignore tiny helper surfaces
+            if isOnCurrentSpace {
+                guard w >= 40 && h >= 40 else { continue }
+            } else {
+                guard w >= 200 && h >= 160 else { continue }
+            }
+            seenIDs.insert(winId)
 
-            let winId = dict[kCGWindowNumber as String] as? Int ?? 0
             let title = dict[kCGWindowName as String] as? String ?? ""
             let owner = dict[kCGWindowOwnerName as String] as? String ?? ""
 
@@ -326,10 +442,19 @@ public final class AppWorkspaceController: @unchecked Sendable {
                 appName: owner,
                 pid: pid,
                 frame: ScreenRect(x: x, y: y, width: w, height: h),
-                isOnScreen: true,
+                isOnScreen: isOnCurrentSpace,
                 layer: layer
             )
             result[pid, default: []].append(info)
+        }
+        for (pid, wins) in result {
+            result[pid] = wins.sorted { a, b in
+                if a.isOnScreen != b.isOnScreen { return a.isOnScreen }
+                let aHasTitle = !a.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                let bHasTitle = !b.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                if aHasTitle != bHasTitle { return aHasTitle }
+                return (a.frame.width * a.frame.height) > (b.frame.width * b.frame.height)
+            }
         }
         return result
     }

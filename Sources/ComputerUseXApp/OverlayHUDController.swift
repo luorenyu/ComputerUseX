@@ -18,6 +18,8 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
     @Published public var pillTitle: String? = nil
     @Published public var pillSubtitle: String? = nil
     @Published public var operatorBadgeText: String = "Antigravity · Gemini 4 Argon Medium"
+    @Published public var targetWindowBounds: ScreenRect? = nil
+    @Published public var targetAppName: String? = nil
     @Published public var trailPoints: [ScreenPoint] = []
     @Published public var highlightRect: ScreenRect? = nil
     @Published public var highlightLabel: String? = nil
@@ -75,6 +77,22 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                     windowTitle: windowTitle,
                     windowBounds: windowBounds
                 )
+                let isFront = (windowID == 0) || SyntheticFocusEnforcer.shared.isWindowFrontmostOnScreen(windowID: windowID, pid: pid)
+                if isFront && windowBounds.width >= 80 && windowBounds.height >= 80 {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        self.targetWindowBounds = windowBounds
+                        self.targetAppName = appName
+                        self.showBorderGlow = true
+                        if self.pillTitle == nil {
+                            self.pillTitle = "正在操控「\(appName)」"
+                            self.pillSubtitle = nil
+                        }
+                    }
+                    self.scheduleAutoFade()
+                } else {
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
+                }
 
             case .setActiveGlow(let active):
                 if active {
@@ -82,6 +100,8 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 }
                 if self.isTargetInBackground {
                     self.showBorderGlow = false
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
                     return
                 }
                 withAnimation(.easeInOut(duration: 0.25)) {
@@ -103,6 +123,8 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 let cleanedTitle = GeminiPalette.cleanStatusText(title)
                 if cleanedTitle.contains("视觉引擎演示") {
                     MiniPreviewWindowController.shared.viewModel.targetWindowID = 0
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
                     self.updateActiveScreen(for: PermissionManager.shared.currentMouseLocation())
                 } else {
                     self.refreshFallbackActiveScreen()
@@ -110,12 +132,21 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 MiniPreviewWindowController.shared.updateStatus(cleanedTitle)
                 if self.isTargetInBackground {
                     self.showBorderGlow = false
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
                     self.pillTitle = nil
                     self.pillSubtitle = nil
                     return
                 }
+                let pipVM = MiniPreviewWindowController.shared.viewModel
+                if pipVM.targetWindowID > 0 && pipVM.windowBounds.width >= 80 {
+                    self.targetWindowBounds = pipVM.windowBounds
+                    self.targetAppName = pipVM.appName
+                }
+                let fgTitle = cleanedTitle.replacingOccurrences(of: "[后台点击]", with: "[前台操控]")
+                    .replacingOccurrences(of: "[后台输入]", with: "[前台输入]")
                 withAnimation(.spring(response: 0.28, dampingFraction: 0.82)) {
-                    self.pillTitle = cleanedTitle
+                    self.pillTitle = fgTitle
                     self.pillSubtitle = subtitle
                     self.showBorderGlow = true
                 }
@@ -124,27 +155,9 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
             case .pointerTrail:
                 self.trailPoints = []
 
-            case .highlightElement(let rect, let label):
-                self.updateActiveScreen(for: rect.center)
-                MiniPreviewWindowController.shared.showHighlight(rect: rect, label: label)
-                if self.isTargetInBackground {
-                    self.highlightRect = nil
-                    self.highlightLabel = nil
-                    return
-                }
-                withAnimation(.easeOut(duration: 0.15)) {
-                    self.highlightRect = rect
-                    self.highlightLabel = nil
-                }
-                self.highlightClearItem?.cancel()
-                let item = DispatchWorkItem { [weak self] in
-                    withAnimation(.easeOut(duration: 0.25)) {
-                        self?.highlightRect = nil
-                        self?.highlightLabel = nil
-                    }
-                }
-                self.highlightClearItem = item
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.85, execute: item)
+            case .highlightElement:
+                self.highlightRect = nil
+                self.highlightLabel = nil
 
             case .clickRipple(let point, let button, let clickCount):
                 self.updateActiveScreen(for: point)
@@ -226,11 +239,20 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
                 SessionBillWindowController.shared.recordCompletedBillSilently(bill)
                 MiniPreviewWindowController.shared.completeAndHidePreview()
                 VirtualCursorWindowController.shared.hideCursor()
+                withAnimation(.easeOut(duration: 0.25)) {
+                    self.showBorderGlow = false
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
+                    self.pillTitle = nil
+                    self.pillSubtitle = nil
+                }
                 MainDashboardWindowController.shared.refreshData()
 
             case .clear:
                 withAnimation(.easeOut(duration: 0.2)) {
                     self.showBorderGlow = false
+                    self.targetWindowBounds = nil
+                    self.targetAppName = nil
                     self.pillTitle = nil
                     self.pillSubtitle = nil
                     self.trailPoints = []
@@ -259,12 +281,14 @@ public final class HUDViewModel: ObservableObject, @unchecked Sendable {
         let item = DispatchWorkItem { [weak self] in
             withAnimation(.easeInOut(duration: 0.45)) {
                 self?.showBorderGlow = false
+                self?.targetWindowBounds = nil
+                self?.targetAppName = nil
                 self?.pillTitle = nil
                 self?.pillSubtitle = nil
             }
         }
         fadeWorkItem = item
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.8, execute: item)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.2, execute: item)
     }
 }
 
@@ -396,21 +420,28 @@ struct OverlayHUDRootView: View {
                     .transition(.opacity)
                 }
 
-                // 2. Target Element Highlight Frame (Locked to the active screen)
-                if isCurrentActiveScreen, let rect = viewModel.highlightRect {
-                    RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        .stroke(GeminiPalette.auroraGradient, lineWidth: 2.2)
-                        .background(
-                            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                                .fill(GeminiPalette.blue.opacity(0.10))
+                // 1B. Target Foreground Window Subtle Border Frame (when operating a topmost window)
+                if viewModel.showBorderGlow,
+                   isCurrentActiveScreen,
+                   let winBounds = viewModel.targetWindowBounds,
+                   winBounds.width >= 80,
+                   winBounds.height >= 80 {
+                    let localX = winBounds.x - screenOrigin.x
+                    let localY = winBounds.y - screenOrigin.y
+
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .strokeBorder(
+                            GeminiPalette.auroraGradient,
+                            lineWidth: 2.2
                         )
-                        .shadow(color: GeminiPalette.blue.opacity(0.65), radius: 8)
-                        .shadow(color: GeminiPalette.violet.opacity(0.45), radius: 14)
-                        .frame(width: max(12, rect.width), height: max(12, rect.height))
+                        .shadow(color: GeminiPalette.blue.opacity(0.55), radius: 8)
+                        .shadow(color: GeminiPalette.violet.opacity(0.35), radius: 12)
+                        .frame(width: winBounds.width, height: winBounds.height)
                         .position(
-                            x: (rect.x - screenOrigin.x) + rect.width / 2.0,
-                            y: (rect.y - screenOrigin.y) + rect.height / 2.0
+                            x: localX + winBounds.width / 2.0,
+                            y: localY + winBounds.height / 2.0
                         )
+                        .transition(.opacity)
                 }
 
                 // 4. Click Ripples (Locked to the active screen)

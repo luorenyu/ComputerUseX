@@ -202,8 +202,9 @@ public final class SessionBillingManager: @unchecked Sendable {
     private var idleFinalizeWorkItem: DispatchWorkItem?
 
     /// Idle window (seconds) after which an active sequence of ComputerUse commands is finalized into a complete bill.
-    /// Set to 45s so multi-turn Agent workflows (where the LLM reasons for 5–20s between steps) stay in one continuous task session.
-    public var sessionIdleTimeoutSeconds: TimeInterval = 45.0
+    /// Set to 300s (5 minutes) so multi-turn Agent workflows (where the LLM reasons, renders flowcharts, or runs tools
+    /// for 30–180s between GUI steps) stay in one continuous task session bill instead of fragmenting.
+    public var sessionIdleTimeoutSeconds: TimeInterval = 300.0
 
     public var billsFileURL: URL {
         AuditAndSecurityGuard.shared.baseDirectory.appendingPathComponent("bills.jsonl")
@@ -286,24 +287,64 @@ public final class SessionBillingManager: @unchecked Sendable {
 
     // MARK: - Automatic Caller Agent & Model Detection
 
+    public static func normalizeAgentDisplayName(_ rawName: String) -> String {
+        let trimmed = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lower = trimmed.lowercased()
+        if lower.contains("antigravity") {
+            return "Antigravity"
+        } else if lower.contains("openclaw") || lower.contains("clawd") {
+            return "OpenClaw"
+        } else if lower.contains("claude") {
+            return "Claude Code"
+        } else if lower.contains("codex") {
+            return "OpenAI Codex"
+        } else if lower.contains("opencode") {
+            return "OpenCode"
+        } else if lower.contains("minimax") || lower.contains("mmx") || lower.contains("mcode") {
+            return "MiniMaxCode"
+        } else if lower.contains("harness") || lower.contains("hermes") {
+            return "Harness"
+        } else if lower == "pi" || lower.contains("pi-coding") || lower.contains("pi_agent") {
+            return "Pi"
+        } else if lower.contains("cursor") {
+            return "Cursor Agent"
+        } else if lower.contains("windsurf") {
+            return "Windsurf Cascade"
+        } else if lower.contains("gemini") {
+            return "Gemini CLI"
+        }
+        return trimmed
+    }
+
     public func registerMCPClient(name: String?, modelHint: String? = nil) {
+        let normalizedName = name.map { Self.normalizeAgentDisplayName($0) }
+        let inferredOrExplicitModel: String?
+        if let m = modelHint, !m.isEmpty {
+            inferredOrExplicitModel = m
+        } else if let n = normalizedName, !n.isEmpty {
+            inferredOrExplicitModel = Self.inferModelForAgent(n, ancestryText: n.lowercased())
+        } else {
+            inferredOrExplicitModel = nil
+        }
+
         lock.lock()
-        if let n = name, !n.isEmpty {
+        if let n = normalizedName, !n.isEmpty {
             mcpClientName = n
             lastExplicitAgent = n
         }
-        if let m = modelHint, !m.isEmpty {
+        if let m = inferredOrExplicitModel, !m.isEmpty {
             mcpModelHint = m
             lastExplicitModel = m
         }
         lock.unlock()
-        if (name != nil && !name!.isEmpty) || (modelHint != nil && !modelHint!.isEmpty) {
-            savePersistedOperatorContext(agent: name, model: modelHint)
+        if (normalizedName != nil && !normalizedName!.isEmpty) || (inferredOrExplicitModel != nil && !inferredOrExplicitModel!.isEmpty) {
+            savePersistedOperatorContext(agent: normalizedName, model: inferredOrExplicitModel)
         }
     }
 
-    /// Inspects explicit flags, environment variables, MCP handshake, persisted operator context, and macOS process ancestry (`getppid()` chain)
-    /// to determine which AI Agent and LLM Model is currently operating OpenComputerUse.
+    /// Inspects explicit flags, environment variables, MCP handshake, live macOS process ancestry (`getppid()` chain with
+    /// full executable path + command-line arguments), and persisted operator context to determine which AI Agent and
+    /// LLM Model is currently operating ComputerUseX in real time.
     public func detectCurrentOperator(
         explicitAgent: String? = nil,
         explicitModel: String? = nil
@@ -312,81 +353,118 @@ public final class SessionBillingManager: @unchecked Sendable {
 
         let cleanExplicitAgent = explicitAgent?.trimmingCharacters(in: .whitespacesAndNewlines)
         let cleanExplicitModel = explicitModel?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedExplicitAgent = (cleanExplicitAgent != nil && !cleanExplicitAgent!.isEmpty)
+            ? Self.normalizeAgentDisplayName(cleanExplicitAgent!)
+            : nil
 
         lock.lock()
-        if let ea = cleanExplicitAgent, !ea.isEmpty {
-            lastExplicitAgent = ea
-        }
-        if let em = cleanExplicitModel, !em.isEmpty {
-            lastExplicitModel = em
-        }
-        let stickyAgent = lastExplicitAgent
-        let stickyModel = lastExplicitModel
+        let prevStickyAgent = lastExplicitAgent
+        let prevStickyModel = lastExplicitModel
         lock.unlock()
 
-        if (cleanExplicitAgent != nil && !cleanExplicitAgent!.isEmpty) || (cleanExplicitModel != nil && !cleanExplicitModel!.isEmpty) {
-            savePersistedOperatorContext(agent: cleanExplicitAgent ?? stickyAgent, model: cleanExplicitModel ?? stickyModel)
-        }
-
-        var resolvedAgent = cleanExplicitAgent
-        var resolvedModel = cleanExplicitModel
-
-        if resolvedAgent == nil || resolvedAgent!.isEmpty {
-            resolvedAgent = env["CUX_AGENT"] ?? env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"] ?? mcpClientName ?? stickyAgent
-        }
-        if resolvedModel == nil || resolvedModel!.isEmpty {
-            resolvedModel = env["CUX_MODEL"] ?? env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? env["MINIMAX_MODEL"] ?? mcpModelHint ?? stickyModel
-        }
-
-        // Walk parent process chain (up to 7 levels) if agent is not explicitly provided
-        let ancestry = Self.collectProcessAncestry(maxDepth: 7)
+        // Walk parent process chain (up to 9 levels) to detect the live calling Agent process
+        let ancestry = Self.collectProcessAncestry(maxDepth: 9)
         let joinedAncestry = ancestry.joined(separator: " | ").lowercased()
+        let liveAncestryAgent = Self.detectAgentFromAncestryAndEnv(joinedAncestry: joinedAncestry, env: env)
 
+        var resolvedAgent: String? = normalizedExplicitAgent
         if resolvedAgent == nil || resolvedAgent!.isEmpty {
-            if joinedAncestry.contains("antigravity") || env["ANTIGRAVITY_AGENT"] != nil || env["__CFBundleIdentifier"]?.lowercased().contains("antigravity") == true {
+            if let envAgent = env["CUX_AGENT"] ?? env["OCU_AGENT"] ?? env["MCP_CLIENT_NAME"], !envAgent.isEmpty {
+                resolvedAgent = Self.normalizeAgentDisplayName(envAgent)
+            } else if let mcpAgent = mcpClientName, !mcpAgent.isEmpty {
+                resolvedAgent = Self.normalizeAgentDisplayName(mcpAgent)
+            } else if let liveAgent = liveAncestryAgent, !liveAgent.isEmpty {
+                // Live process ancestry ALWAYS takes priority over stale stickyAgent from a previous session!
+                resolvedAgent = liveAgent
+            } else if let sticky = prevStickyAgent, !sticky.isEmpty {
+                resolvedAgent = Self.normalizeAgentDisplayName(sticky)
+            } else if FileManager.default.fileExists(atPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity").path) {
                 resolvedAgent = "Antigravity"
-            } else if joinedAncestry.contains("claude") || env["CLAUDECODE"] != nil {
-                resolvedAgent = "Claude Code"
-            } else if joinedAncestry.contains("codex") || env["CODEX_SANDBOX"] != nil {
-                resolvedAgent = "OpenAI Codex"
-            } else if joinedAncestry.contains("openclaw") || joinedAncestry.contains("clawd") || env["OPENCLAW_HOME"] != nil {
-                resolvedAgent = "OpenClaw"
-            } else if joinedAncestry.contains("opencode") || env["OPENCODE"] != nil {
-                resolvedAgent = "OpenCode"
-            } else if joinedAncestry.contains("minimax") || joinedAncestry.contains("mmx") || joinedAncestry.contains("mcode") || env["MINIMAX_API_KEY"] != nil {
-                resolvedAgent = "MiniMaxCode"
-            } else if joinedAncestry.contains("harness") || joinedAncestry.contains("hermes") || env["HARNESS_AGENT"] != nil {
-                resolvedAgent = "Harness"
-            } else if joinedAncestry.contains("pi-coding") || joinedAncestry.contains("pi ") || env["PI_AGENT_DIR"] != nil {
-                resolvedAgent = "Pi"
-            } else if joinedAncestry.contains("cursor") {
-                resolvedAgent = "Cursor Agent"
-            } else if joinedAncestry.contains("windsurf") {
-                resolvedAgent = "Windsurf Cascade"
-            } else if joinedAncestry.contains("gemini") {
-                resolvedAgent = "Gemini CLI"
             } else {
-                if FileManager.default.fileExists(atPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini/antigravity").path) {
-                    resolvedAgent = "Antigravity"
-                } else {
-                    resolvedAgent = "Terminal CLI Agent"
-                }
+                resolvedAgent = "Terminal CLI Agent"
             }
         }
 
         let finalAgent = resolvedAgent ?? "Antigravity"
+        let agentChangedFromSticky = (prevStickyAgent != nil) && (Self.normalizeAgentDisplayName(prevStickyAgent!) != finalAgent)
 
+        var resolvedModel: String? = cleanExplicitModel
         if resolvedModel == nil || resolvedModel!.isEmpty {
-            resolvedModel = Self.inferModelForAgent(finalAgent, ancestryText: joinedAncestry)
+            if let envModel = env["CUX_MODEL"] ?? env["OCU_MODEL"] ?? env["ANTHROPIC_MODEL"] ?? env["OPENAI_MODEL"] ?? env["GEMINI_MODEL"] ?? env["MINIMAX_MODEL"], !envModel.isEmpty {
+                resolvedModel = envModel
+            } else if let mcpMod = mcpModelHint, !mcpMod.isEmpty, mcpClientName == finalAgent {
+                resolvedModel = mcpMod
+            } else if !agentChangedFromSticky,
+                      let stickyMod = prevStickyModel,
+                      !stickyMod.isEmpty,
+                      Self.isModelCompatibleWithAgent(model: stickyMod, agent: finalAgent) {
+                resolvedModel = stickyMod
+            } else {
+                resolvedModel = Self.inferModelForAgent(finalAgent, ancestryText: joinedAncestry)
+            }
         }
 
-        let finalModel = resolvedModel ?? "Gemini 4 Argon Medium"
+        let finalModel = (resolvedModel != nil && !resolvedModel!.isEmpty)
+            ? resolvedModel!
+            : Self.inferModelForAgent(finalAgent, ancestryText: joinedAncestry)
+
+        lock.lock()
+        let shouldPersist = (lastExplicitAgent != finalAgent) || (lastExplicitModel != finalModel)
+        lastExplicitAgent = finalAgent
+        lastExplicitModel = finalModel
+        lock.unlock()
+
+        if shouldPersist {
+            savePersistedOperatorContext(agent: finalAgent, model: finalModel)
+        }
+
         return AgentOperatorIdentity(
             agentName: finalAgent,
             modelName: finalModel,
             clientPid: getpid(),
             sourceDescription: (cleanExplicitModel != nil) ? "agent-reported" : "ancestry"
         )
+    }
+
+    private static func detectAgentFromAncestryAndEnv(joinedAncestry: String, env: [String: String]) -> String? {
+        if joinedAncestry.contains("antigravity") || env["ANTIGRAVITY_AGENT"] != nil || env["__CFBundleIdentifier"]?.lowercased().contains("antigravity") == true {
+            return "Antigravity"
+        } else if joinedAncestry.contains("openclaw") || joinedAncestry.contains("clawd") || env["OPENCLAW_HOME"] != nil {
+            return "OpenClaw"
+        } else if joinedAncestry.contains("claude") || env["CLAUDECODE"] != nil {
+            return "Claude Code"
+        } else if joinedAncestry.contains("codex") || env["CODEX_SANDBOX"] != nil {
+            return "OpenAI Codex"
+        } else if joinedAncestry.contains("opencode") || env["OPENCODE"] != nil {
+            return "OpenCode"
+        } else if joinedAncestry.contains("minimax") || joinedAncestry.contains("mmx") || joinedAncestry.contains("mcode") || env["MINIMAX_API_KEY"] != nil {
+            return "MiniMaxCode"
+        } else if joinedAncestry.contains("harness") || joinedAncestry.contains("hermes") || env["HARNESS_AGENT"] != nil {
+            return "Harness"
+        } else if joinedAncestry.contains("pi-coding") || joinedAncestry.contains("/pi ") || env["PI_AGENT_DIR"] != nil {
+            return "Pi"
+        } else if joinedAncestry.contains("cursor.app") || joinedAncestry.contains("cursor-") {
+            return "Cursor Agent"
+        } else if joinedAncestry.contains("windsurf") {
+            return "Windsurf Cascade"
+        } else if joinedAncestry.contains("gemini-cli") || joinedAncestry.contains("@google/gemini-cli") {
+            return "Gemini CLI"
+        }
+        return nil
+    }
+
+    private static func isModelCompatibleWithAgent(model: String, agent: String) -> Bool {
+        let lowerAgent = agent.lowercased()
+        let lowerModel = model.lowercased()
+        if lowerAgent.contains("antigravity") {
+            return lowerModel.contains("gemini") || lowerModel.contains("argon") || lowerModel.contains("claude")
+        }
+        if lowerAgent.contains("openclaw") {
+            // Never let Antigravity's internal "Gemini 4 Argon" default leak into OpenClaw unless configured in openclaw.json
+            if lowerModel.contains("argon") { return false }
+            return true
+        }
+        return true
     }
 
     private static func inferModelForAgent(_ agent: String, ancestryText: String) -> String {
@@ -409,16 +487,33 @@ public final class SessionBillingManager: @unchecked Sendable {
             return "gpt-5-codex"
         }
 
+        if lowerAgent.contains("openclaw") {
+            let clawConfigURL = home.appendingPathComponent(".openclaw/openclaw.json")
+            if let data = try? Data(contentsOf: clawConfigURL),
+               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let agents = root["agents"] as? [String: Any],
+               let defaults = agents["defaults"] as? [String: Any],
+               let modelDict = defaults["model"] as? [String: Any],
+               let primary = modelDict["primary"] as? String,
+               !primary.isEmpty {
+                return primary
+            }
+            return "claude-sonnet-4"
+        }
+
         if lowerAgent.contains("claude") {
+            let claudeSettingsURL = home.appendingPathComponent(".claude/settings.json")
+            if let data = try? Data(contentsOf: claudeSettingsURL),
+               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let model = root["model"] as? String,
+               !model.isEmpty {
+                return model
+            }
             return "claude-sonnet-4"
         }
 
         if lowerAgent.contains("minimax") || lowerAgent.contains("mmx") {
             return "MiniMax-M2.5"
-        }
-
-        if lowerAgent.contains("openclaw") {
-            return "claude-sonnet-4"
         }
 
         if lowerAgent.contains("opencode") {
@@ -442,7 +537,7 @@ public final class SessionBillingManager: @unchecked Sendable {
         }
 
         if lowerAgent.contains("gemini") {
-            return "Gemini 4 Argon Medium"
+            return "Gemini 2.5 Pro"
         }
 
         return "Gemini 4 Argon Medium"
@@ -463,12 +558,62 @@ public final class SessionBillingManager: @unchecked Sendable {
                 let raw = UnsafeRawPointer(ptr).assumingMemoryBound(to: CChar.self)
                 return String(cString: raw)
             }
-            results.append(comm)
+
+            // Also resolve full executable path and command-line arguments via KERN_PROCARGS2
+            // so Node/Electron/Python wrappers reveal their real parent Agent (e.g. Antigravity.app, openclaw, claude, codex)
+            let procArgs = readProcessArguments(pid: pid)
+            if !procArgs.isEmpty {
+                results.append("\(comm) (\(procArgs))")
+            } else {
+                results.append(comm)
+            }
+
             let ppid = info.kp_eproc.e_ppid
             if ppid == pid || ppid <= 1 { break }
             pid = ppid
         }
         return results
+    }
+
+    private static func readProcessArguments(pid: pid_t) -> String {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size: Int = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 4, size < 65536 else {
+            return ""
+        }
+        var buffer = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else {
+            return ""
+        }
+        var argc: Int32 = 0
+        memcpy(&argc, &buffer, MemoryLayout<Int32>.size)
+        let maxArgs = min(Int(max(1, argc)), 8)
+        var pos = MemoryLayout<Int32>.size
+
+        var tokens: [String] = []
+        // First string is the executable path
+        while pos < size && buffer[pos] == 0 { pos += 1 }
+        let start = pos
+        while pos < size && buffer[pos] != 0 { pos += 1 }
+        if pos > start, let execPath = String(bytes: buffer[start..<pos], encoding: .utf8) {
+            tokens.append(execPath)
+        }
+        // Skip null padding after execPath
+        while pos < size && buffer[pos] == 0 { pos += 1 }
+
+        // Read up to `maxArgs` argv strings
+        for _ in 0..<maxArgs {
+            guard pos < size else { break }
+            let argStart = pos
+            while pos < size && buffer[pos] != 0 { pos += 1 }
+            if pos > argStart, let argStr = String(bytes: buffer[argStart..<pos], encoding: .utf8), !argStr.isEmpty {
+                if argStr.count <= 220 {
+                    tokens.append(argStr)
+                }
+            }
+            pos += 1
+        }
+        return tokens.joined(separator: " ")
     }
 
     // MARK: - Real-Time Command Metering & Billing
@@ -487,6 +632,49 @@ public final class SessionBillingManager: @unchecked Sendable {
         // ~4 ASCII chars per token, ~1.4 CJK/Unicode chars per token
         let estimated = Int((Double(asciiCount) / 3.8).rounded(.up)) + Int((Double(nonAsciiCount) / 1.4).rounded(.up))
         return max(1, estimated)
+    }
+
+    /// Immediately updates the active operator identity and broadcasts `.operatorStatus` to the HUD / Mini PiP / MenuBar
+    /// BEFORE a command starts executing (so cursor animations and status pills show the real caller right away).
+    public func notifyCommandStarting(request: IPCRequest) {
+        let ignoredCommands: Set<String> = ["hud_event", "status", "bill", "bills", "audit", "dashboard", "open", "session_finish"]
+        if ignoredCommands.contains(request.command) {
+            return
+        }
+
+        let identity = detectCurrentOperator(
+            explicitAgent: request.agentName,
+            explicitModel: request.modelName
+        )
+
+        lock.lock()
+        // If a different Agent takes over while an older Agent's session was still open, finalize the previous Agent's bill cleanly
+        if activeSessionId != nil && !activeSteps.isEmpty && currentOperator.agentName != identity.agentName {
+            lock.unlock()
+            _ = finalizeCurrentSessionIfActive(isIdleTimeout: true)
+            lock.lock()
+        }
+        currentOperator = identity
+        let actionCount = activeSteps.count
+        let totalTokens = cumulativeInputTokens + cumulativeOutputTokens
+        let runningCost = Self.computeCostUSD(
+            inputTokens: cumulativeInputTokens,
+            outputTokens: cumulativeOutputTokens,
+            modelName: identity.modelName
+        )
+        lock.unlock()
+
+        let targetDesc = request.target ?? request.app ?? request.command
+        KillSwitchMonitor.shared.emitHUDEvent(
+            .operatorStatus(
+                agentName: identity.agentName,
+                modelName: identity.modelName,
+                currentAction: "\(request.command) → \(targetDesc)",
+                actionCount: actionCount,
+                totalTokens: totalTokens,
+                costUSD: runningCost
+            )
+        )
     }
 
     /// Records a single command execution into the current active session bill and emits live operator HUD updates.

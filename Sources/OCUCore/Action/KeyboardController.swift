@@ -90,6 +90,9 @@ public final class KeyboardController: @unchecked Sendable {
         )
 
         let targetPid = resolveTargetPid(forVirtualMode: isVirtual)
+        if flags == .maskCommand && keyCode == 0, let pid = targetPid, pid > 0 {
+            AXScanner.shared.selectAllInFocusedElement(pid: pid)
+        }
         postKeyCode(keyCode, flags: flags, targetPid: targetPid)
         let ms = Int(Date().timeIntervalSince(startTime) * 1000)
         KillSwitchMonitor.shared.logAction("⌨️ Pressed \(combo)")
@@ -109,6 +112,7 @@ public final class KeyboardController: @unchecked Sendable {
         dy: Double? = nil,
         clearFirst: Bool = false,
         submit: Bool = false,
+        imagePath: String? = nil,
         virtualCursor: Bool? = nil
     ) throws -> ActionOutcome {
         let startTime = Date()
@@ -123,6 +127,8 @@ public final class KeyboardController: @unchecked Sendable {
         let offsetX = dx ?? 0
         let offsetY = dy ?? 0
         let hasOffset = (abs(offsetX) > 0.1 || abs(offsetY) > 0.1)
+        let hasNewlines = text.contains("\n") || text.contains("\r")
+        let hasImageAttachment = (imagePath != nil && !imagePath!.isEmpty)
 
         let restoreUserFocusIfNeeded: (Int32?) -> Void = { pid in
             guard isVirtual,
@@ -137,9 +143,11 @@ public final class KeyboardController: @unchecked Sendable {
         }
 
         // Fast Path A: When targeting an AX text field in virtual mode with no relative offset, try setting
-        // kAXValueAttribute directly so background browsers/Cocoa apps receive text without stealing OS focus
-        // or touching the user's system clipboard.
-        if isVirtual && !hasOffset,
+        // kAXValueAttribute / kAXSelectedTextAttribute directly so background browsers/Cocoa/Electron apps
+        // receive text (including multiline text) without stealing OS focus, switching Spaces, or touching clipboard.
+        // Skip Fast Path A only when text starts with "@" (mention popup trigger) or includes an image attachment.
+        var attemptedNativeAXForTarget = false
+        if isVirtual && !hasOffset && !text.hasPrefix("@") && !hasImageAttachment && !text.isEmpty,
            let targetRef = target, !targetRef.isEmpty,
            let el = try? ElementSnapshotStore.shared.resolveTarget(targetRef),
            el.source == .ax {
@@ -148,7 +156,8 @@ public final class KeyboardController: @unchecked Sendable {
                 preferredPid: el.pid,
                 preferredAppName: el.appName
             )
-            if AXScanner.shared.resolveLiveAXElement(for: el.ref) != nil {
+            if AXScanner.shared.resolveLiveAXElement(for: el.ref, pid: el.pid) != nil {
+                attemptedNativeAXForTarget = true
                 try MouseController.shared.moveSmoothly(
                     to: el.centerPoint,
                     duration: 0.16,
@@ -158,7 +167,25 @@ public final class KeyboardController: @unchecked Sendable {
                     label: nil
                 )
                 Thread.sleep(forTimeInterval: 0.05)
-                if AXScanner.shared.performNativeSetValue(ref: el.ref, value: text, submit: submit) {
+                var nativeSetOk = AXScanner.shared.performNativeSetValue(
+                    ref: el.ref,
+                    value: text,
+                    clearFirst: clearFirst,
+                    submit: submit,
+                    pid: el.pid
+                )
+                if !nativeSetOk {
+                    _ = AXScanner.shared.performNativePress(ref: el.ref)
+                    Thread.sleep(forTimeInterval: 0.04)
+                    nativeSetOk = AXScanner.shared.performNativeSetValue(
+                        ref: el.ref,
+                        value: text,
+                        clearFirst: clearFirst,
+                        submit: submit,
+                        pid: el.pid
+                    )
+                }
+                if nativeSetOk {
                     restoreUserFocusIfNeeded(el.pid)
                     KillSwitchMonitor.shared.emitHUDEvent(
                         .highlightElement(rect: el.frame, label: el.label)
@@ -171,16 +198,19 @@ public final class KeyboardController: @unchecked Sendable {
                         .statusPill(title: "⌨️ [后台输入] \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
                     )
                     if submit {
-                        if let wc = winCtx {
-                            SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
-                                pid: wc.pid,
-                                windowID: wc.windowID,
-                                windowBounds: wc.bounds,
-                                activationPoint: el.centerPoint
-                            )
+                        Thread.sleep(forTimeInterval: 0.05)
+                        if !AXScanner.shared.pressSendButton(pid: el.pid) {
+                            if let wc = winCtx {
+                                SyntheticFocusEnforcer.shared.enforceBackgroundFocus(
+                                    pid: wc.pid,
+                                    windowID: wc.windowID,
+                                    windowBounds: wc.bounds,
+                                    activationPoint: el.centerPoint
+                                )
+                            }
+                            Thread.sleep(forTimeInterval: 0.04)
+                            postKeyCode(36, flags: [], targetPid: el.pid)
                         }
-                        Thread.sleep(forTimeInterval: 0.04)
-                        postKeyCode(36, flags: [], targetPid: el.pid)
                     }
                     let ms = Int(Date().timeIntervalSince(startTime) * 1000)
                     KillSwitchMonitor.shared.logAction("⌨️ [AXValue] Typed \"\(preview)\" -> \(el.ref)")
@@ -221,7 +251,14 @@ public final class KeyboardController: @unchecked Sendable {
         if isVirtual, let pid = targetPid, pid > 0 {
             let effectivePt = clickedPoint ?? targetCtx?.bounds.center
             if let pt = effectivePt {
-                if AXScanner.shared.performNativeSetValueAtPosition(pid: pid, point: pt, value: text, submit: submit) {
+                if !attemptedNativeAXForTarget && !text.hasPrefix("@") && !hasNewlines && !hasImageAttachment && !text.isEmpty &&
+                    AXScanner.shared.performNativeSetValueAtPosition(pid: pid, point: pt, value: text, submit: submit) {
+                    if submit {
+                        Thread.sleep(forTimeInterval: 0.05)
+                        if !AXScanner.shared.pressSendButton(pid: pid) {
+                            postKeyCode(36, flags: [], targetPid: pid)
+                        }
+                    }
                     restoreUserFocusIfNeeded(pid)
                     let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
                     KillSwitchMonitor.shared.emitHUDEvent(
@@ -237,7 +274,8 @@ public final class KeyboardController: @unchecked Sendable {
                         elapsedMs: ms
                     )
                 }
-                if BrowserBridgeController.shared.isBrowserApp(nil, pid: pid),
+                if !hasImageAttachment && !text.isEmpty &&
+                   BrowserBridgeController.shared.isBrowserApp(nil, pid: pid),
                    BrowserBridgeController.shared.typeAtScreenPoint(
                        text: text,
                        point: pt,
@@ -261,8 +299,6 @@ public final class KeyboardController: @unchecked Sendable {
                         elapsedMs: ms
                     )
                 }
-                // Ensure Accessibility focus is placed on the hit-tested element at `pt` before Unicode key events
-                AXScanner.shared.focusElementAtPosition(pid: pid, point: pt)
             }
         }
 
@@ -273,27 +309,61 @@ public final class KeyboardController: @unchecked Sendable {
                 windowBounds: ctx.bounds,
                 activationPoint: clickedPoint ?? ctx.bounds.center
             )
+            // Re-assert Accessibility focus on the target text field AFTER enforceBackgroundFocus so AppKitDefined
+            // subtype 1/4 never resets focus back to an outer container before keystrokes arrive!
+            if let tRef = target, !tRef.isEmpty,
+               let el = try? ElementSnapshotStore.shared.resolveTarget(tRef),
+               el.source == .ax {
+                _ = AXScanner.shared.performNativePress(ref: el.ref)
+            } else if let pt = clickedPoint ?? targetCtx?.bounds.center {
+                AXScanner.shared.focusElementAtPosition(pid: ctx.pid, point: pt)
+            }
+            Thread.sleep(forTimeInterval: 0.04)
         }
 
-        let preview = text.count > 28 ? String(text.prefix(28)) + "..." : text
+        let preview = text.count > 28 ? String(text.prefix(28)) + "..." : (text.isEmpty && hasImageAttachment ? "[Image Attachment]" : text)
         KillSwitchMonitor.shared.emitHUDEvent(
             .statusPill(title: "⌨️ 输入文本: \"\(preview)\"", subtitle: submit ? "输入后自动回车" : nil)
         )
 
         if clearFirst {
-            // Cmd + A then Backspace
-            postKeyCode(0, flags: .maskCommand, targetPid: targetPid)
-            Thread.sleep(forTimeInterval: 0.03)
-            postKeyCode(51, flags: [], targetPid: targetPid)
-            Thread.sleep(forTimeInterval: 0.03)
+            // Select all via AX (works in background Electron/AppKit without menu bar) + Cmd+A then Backspace
+            let hasContentToClear: Bool
+            if let pid = targetPid, pid > 0 {
+                hasContentToClear = AXScanner.shared.selectAllInFocusedElement(pid: pid)
+            } else {
+                hasContentToClear = true
+            }
+            if hasContentToClear {
+                postKeyCode(0, flags: .maskCommand, targetPid: targetPid)
+                Thread.sleep(forTimeInterval: 0.03)
+                postKeyCode(51, flags: [], targetPid: targetPid)
+                Thread.sleep(forTimeInterval: 0.03)
+            }
         }
 
-        // Safe clipboard transaction for reliable Chinese/Emoji/multi-character injection
-        injectTextViaSafePasteboardOrUnicode(text, targetPid: targetPid)
+        // Safe Unicode / clipboard transaction for reliable Chinese/Emoji/multiline injection
+        if !text.isEmpty {
+            injectTextViaSafePasteboardOrUnicode(text, targetPid: targetPid)
+        }
+
+        // Optional image attachment paste (`--image <path>`) with clipboard preservation
+        if let imgPath = imagePath, !imgPath.isEmpty {
+            if !text.isEmpty {
+                postKeyCode(36, flags: .maskShift, targetPid: targetPid)
+                Thread.sleep(forTimeInterval: 0.04)
+            }
+            try pasteImageFile(at: imgPath, targetPid: targetPid)
+        }
 
         if submit {
-            Thread.sleep(forTimeInterval: 0.05)
-            postKeyCode(36, flags: [], targetPid: targetPid) // Return key
+            // Allow 80ms for ProseMirror/Slate/Lexical DOM state to update and remove `send-button-container--disable`
+            Thread.sleep(forTimeInterval: 0.08)
+            if let pid = targetPid, AXScanner.shared.pressSendButton(pid: pid) {
+                // Sent via native AXPressAction on send-button-container
+            } else {
+                postKeyCode(36, flags: [], targetPid: targetPid) // Return key
+            }
             if hasOffset,
                let targetRef = target,
                let anchorEl = try? ElementSnapshotStore.shared.resolveTarget(targetRef),
@@ -332,26 +402,39 @@ public final class KeyboardController: @unchecked Sendable {
     }
 
     private func injectTextViaSafePasteboardOrUnicode(_ text: String, targetPid: Int32?) {
+        let normalized = text
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        let lines = normalized.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
         // When typing into a background application (targetPid != nil), inject Unicode key events directly to `pid`
         // (matching Codex `SynthesizedEvent.type(string:)`) because background apps do not own the active macOS
         // menu bar to route Cmd+V `performKeyEquivalent:`, and this avoids touching the user's clipboard!
+        // For multiline strings, send `Shift+Enter` (`keyCode 36`, `.maskShift`) between lines so chat inputs
+        // (Feishu, WeChat, Slack) insert soft line breaks instead of prematurely submitting.
         if let pid = targetPid {
-            let utf16 = Array(text.utf16)
-            let chunkSize = 20
-            var idx = 0
-            while idx < utf16.count {
-                let end = min(idx + chunkSize, utf16.count)
-                var slice = Array(utf16[idx..<end])
-                if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
-                   let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
-                    down.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
-                    up.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
-                    down.postToPid(pid)
-                    Thread.sleep(forTimeInterval: 0.012)
-                    up.postToPid(pid)
-                    Thread.sleep(forTimeInterval: 0.012)
+            for (lineIdx, line) in lines.enumerated() {
+                let utf16 = Array(line.utf16)
+                let chunkSize = 20
+                var idx = 0
+                while idx < utf16.count {
+                    let end = min(idx + chunkSize, utf16.count)
+                    var slice = Array(utf16[idx..<end])
+                    if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
+                       let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
+                        down.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                        up.keyboardSetUnicodeString(stringLength: slice.count, unicodeString: &slice)
+                        down.postToPid(pid)
+                        Thread.sleep(forTimeInterval: 0.012)
+                        up.postToPid(pid)
+                        Thread.sleep(forTimeInterval: 0.012)
+                    }
+                    idx = end
                 }
-                idx = end
+                if lineIdx + 1 < lines.count {
+                    postKeyCode(36, flags: .maskShift, targetPid: pid)
+                    Thread.sleep(forTimeInterval: 0.025)
+                }
             }
             return
         }
@@ -360,7 +443,7 @@ public final class KeyboardController: @unchecked Sendable {
         let previousString = pasteboard.string(forType: .string)
 
         pasteboard.clearContents()
-        if pasteboard.setString(text, forType: .string) {
+        if pasteboard.setString(normalized, forType: .string) {
             Thread.sleep(forTimeInterval: 0.02)
             // Post Cmd+V (keyCode 9 = 'v')
             postKeyCode(9, flags: .maskCommand, targetPid: targetPid)
@@ -373,7 +456,7 @@ public final class KeyboardController: @unchecked Sendable {
             }
         } else {
             // Fallback to direct Unicode keyboard event
-            let utf16 = Array(text.utf16)
+            let utf16 = Array(normalized.utf16)
             if let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) {
                 down.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
@@ -386,6 +469,45 @@ public final class KeyboardController: @unchecked Sendable {
                     up.post(tap: .cghidEventTap)
                 }
             }
+        }
+    }
+
+    /// Loads an image file into `NSPasteboard.general`, triggers Paste via Accessibility Menu Bar (`performMenuItemPaste`)
+    /// or `Cmd+V`, and restores the user's previous clipboard contents.
+    private func pasteImageFile(at path: String, targetPid: Int32?) throws {
+        let expandedPath = (path as NSString).expandingTildeInPath
+        guard FileManager.default.fileExists(atPath: expandedPath),
+              let image = NSImage(contentsOfFile: expandedPath) else {
+            throw OCUError(
+                code: .invalidArguments,
+                message: "Could not load image file at '\(path)'.",
+                recoveryHint: "Verify that the image file path exists and is a valid PNG/JPEG/TIFF image."
+            )
+        }
+
+        let pasteboard = NSPasteboard.general
+        let savedString = pasteboard.string(forType: .string)
+        let savedTiff = pasteboard.data(forType: .tiff)
+
+        pasteboard.clearContents()
+        pasteboard.writeObjects([image])
+        Thread.sleep(forTimeInterval: 0.04)
+
+        if let pid = targetPid, pid > 0 {
+            if !AXScanner.shared.performMenuItemPaste(pid: pid) {
+                postKeyCode(9, flags: .maskCommand, targetPid: pid)
+            }
+        } else {
+            postKeyCode(9, flags: .maskCommand, targetPid: nil)
+        }
+
+        Thread.sleep(forTimeInterval: 0.22)
+
+        pasteboard.clearContents()
+        if let oldStr = savedString {
+            pasteboard.setString(oldStr, forType: .string)
+        } else if let oldTiff = savedTiff, let oldImg = NSImage(data: oldTiff) {
+            pasteboard.writeObjects([oldImg])
         }
     }
 

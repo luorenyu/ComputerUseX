@@ -7,6 +7,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
 
     private let lock = NSLock()
     private var latestSnapshot: SnapshotResult?
+    private var snapshotsByPid: [Int32: SnapshotResult] = [:]
     private var lastImageHash: UInt64 = 0
     private var lastImageSnapshotId: String? = nil
     private var lastImagePid: Int32 = 0
@@ -51,14 +52,44 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             .statusPill(title: "🔍 正在扫描界面元素 (Snapshot)...", subtitle: appName ?? "当前窗口")
         )
 
-        // 1. Scan Accessibility Tree without forcibly popping minimized Dock windows onto the user's desktop.
-        // Only unminimize if the caller explicitly requested foreground focus (`focusFirst == true`) in physical mode.
+        // 1. Scan Accessibility Tree. If the target app is not running yet, or is minimized in the Dock (`Cmd+M`)
+        //    or closed (`Cmd+W`), automatically launch/unminimize it in the background and tuck its window
+        //    directly underneath the user's active foreground window (e.g. `Antigravity`).
         var axScan = AXScanner.shared.scanApplication(
             appNameFilter: appName,
             preferredWindowID: preferredWindowID,
             windowTitleFilter: windowTitleFilter
         )
-        if focusFirst && !MouseController.shared.useVirtualCursorByDefault && axScan.pid > 0 {
+        if let targetApp = appName, !targetApp.isEmpty {
+            if axScan.pid == 0 {
+                // Target app is not running yet -> launch in background (`open -g`) and tuck under frontmost window
+                if (try? AppWorkspaceController.shared.focusOrLaunchApp(
+                    identifierOrName: targetApp,
+                    launchIfNeeded: true
+                )) != nil {
+                    axScan = AXScanner.shared.scanApplication(
+                        appNameFilter: appName,
+                        preferredWindowID: preferredWindowID,
+                        windowTitleFilter: windowTitleFilter
+                    )
+                }
+            } else if axScan.windowFrame == nil || VirtualDisplayManager.shared.isAppMinimizedOrHidden(pid: axScan.pid) {
+                // Target app is running in Dock (0 windows or minimized via Cmd+M / hidden via Cmd+H) ->
+                // unminimize/reopen and tuck underneath the user's active foreground window (e.g. Antigravity)!
+                let preserveFocus = !focusFirst || MouseController.shared.useVirtualCursorByDefault
+                if AppWorkspaceController.shared.reopenAppWindowIfNeeded(
+                    pid: axScan.pid,
+                    appName: axScan.appName.isEmpty ? targetApp : axScan.appName,
+                    preserveUserFocus: preserveFocus
+                ) {
+                    axScan = AXScanner.shared.scanApplication(
+                        appNameFilter: appName,
+                        preferredWindowID: preferredWindowID,
+                        windowTitleFilter: windowTitleFilter
+                    )
+                }
+            }
+        } else if focusFirst && !MouseController.shared.useVirtualCursorByDefault && axScan.pid > 0 {
             if VirtualDisplayManager.shared.ensureWindowUnminimizedInBackground(pid: axScan.pid) {
                 axScan = AXScanner.shared.scanApplication(
                     appNameFilter: appName,
@@ -70,7 +101,15 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         try AuditAndSecurityGuard.shared.verifyAppAllowed(appName: axScan.appName)
         var axElements = axScan.elements
         if windowOnly, let winRect = axScan.windowFrame {
-            let inWinAX = axElements.filter { $0.frame.intersectionArea(with: winRect) > 0 }
+            // Allow 240pt tolerance around `winRect` because Electron/Chromium apps (like Feishu) can report a clipped
+            // `CGWindowList` bounds when the window is partially moved near a screen edge, while its AX elements remain at their full window coordinates!
+            let paddedWinRect = ScreenRect(
+                x: winRect.x - 450.0,
+                y: winRect.y - 120.0,
+                width: winRect.width + 900.0,
+                height: winRect.height + 240.0
+            )
+            let inWinAX = axElements.filter { $0.frame.intersectionArea(with: paddedWinRect) > 0 }
             if !inWinAX.isEmpty {
                 axElements = inWinAX
             }
@@ -88,7 +127,7 @@ public final class ElementSnapshotStore: @unchecked Sendable {
             }
         }
         axElements = reindexedAX
-        AXScanner.shared.updateLiveElementMap(updatedAXMap)
+        AXScanner.shared.updateLiveElementMap(updatedAXMap, pid: axScan.pid)
         var ocrElements: [UIElementRef] = []
         var capturedImage: CGImage? = nil
         var displayBounds = axScan.windowFrame ?? PermissionManager.shared.displayContaining(
@@ -228,6 +267,17 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         )
 
         saveSnapshot(snapshot)
+        if let wid = axScan.windowID, wid > 0, axScan.pid > 0 {
+            KillSwitchMonitor.shared.emitHUDEvent(
+                .pipTargetWindow(
+                    pid: axScan.pid,
+                    windowID: wid,
+                    appName: axScan.appName,
+                    windowTitle: axScan.windowTitle,
+                    windowBounds: displayBounds
+                )
+            )
+        }
         KillSwitchMonitor.shared.emitHUDEvent(
             .statusPill(
                 title: "✅ 快照完成 (\(allElements.count) 个元素)",
@@ -240,6 +290,9 @@ public final class ElementSnapshotStore: @unchecked Sendable {
     public func saveSnapshot(_ snapshot: SnapshotResult) {
         lock.lock()
         latestSnapshot = snapshot
+        if snapshot.activePid > 0 {
+            snapshotsByPid[snapshot.activePid] = snapshot
+        }
         lock.unlock()
 
         var diskCopy = snapshot
@@ -247,6 +300,13 @@ public final class ElementSnapshotStore: @unchecked Sendable {
         if let data = try? JSONEncoder().encode(diskCopy) {
             try? data.write(to: snapshotFileURL, options: .atomic)
         }
+    }
+
+    public func snapshot(forPid pid: Int32) -> SnapshotResult? {
+        guard pid > 0 else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        return snapshotsByPid[pid]
     }
 
     public func currentSnapshot() -> SnapshotResult? {

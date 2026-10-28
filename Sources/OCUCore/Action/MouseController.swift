@@ -456,18 +456,24 @@ public final class MouseController: @unchecked Sendable {
             }
 
             // 2. Focus the element at `targetPoint`, and only fall back to process-targeted synthesized mouse events (`postToPid`)
-            //    if neither native AX press nor Browser DOM click handled the action (preventing double-clicks or flipped-Y hits).
+            //    if neither native AX press nor Browser DOM click handled the action AND the window is on the current Space
+            //    (sending synthesized mouse/activation events to an off-Space Electron window causes macOS to switch Spaces!).
             if effPid > 0 {
                 AXScanner.shared.focusElementAtPosition(pid: effPid, point: targetPoint)
                 if !nativeOrDomHandled {
-                    SyntheticFocusEnforcer.shared.performBackgroundClick(
-                        at: targetPoint,
-                        button: button,
-                        clickCount: clickCount,
-                        pid: effPid,
-                        windowID: effWid,
-                        windowBounds: effBounds
-                    )
+                    if SpaceFocusMonitor.shared.isWindowOnCurrentSpace(windowID: effWid, pid: effPid) {
+                        SyntheticFocusEnforcer.shared.performBackgroundClick(
+                            at: targetPoint,
+                            button: button,
+                            clickCount: clickCount,
+                            pid: effPid,
+                            windowID: effWid,
+                            windowBounds: effBounds
+                        )
+                    } else {
+                        detailParts.append("crossSpaceSafe=ax-only")
+                        SpaceFocusMonitor.shared.recordSubStepMarker("performBackgroundClick(skipped-crossSpace)")
+                    }
                 }
             }
 
@@ -666,19 +672,20 @@ public final class MouseController: @unchecked Sendable {
             stateLock.lock()
             let savedLoc = virtualCursorLocation
             let savedBounds = lastTargetWindowBounds
+            let savedPid = lastTargetPid
             stateLock.unlock()
+            if let snap = ElementSnapshotStore.shared.currentSnapshot(),
+               snap.screenBounds.width > 40, snap.screenBounds.height > 40 {
+                if let loc = savedLoc, snap.screenBounds.contains(loc), savedPid == snap.activePid {
+                    return loc
+                }
+                return snap.screenBounds.center
+            }
             if let b = savedBounds, b.width > 40, b.height > 40 {
                 if let loc = savedLoc, b.contains(loc) {
                     return loc
                 }
                 return b.center
-            }
-            if let snap = ElementSnapshotStore.shared.currentSnapshot(),
-               snap.screenBounds.width > 40, snap.screenBounds.height > 40 {
-                if let loc = savedLoc, snap.screenBounds.contains(loc) {
-                    return loc
-                }
-                return snap.screenBounds.center
             }
             return currentVirtualOrPhysicalLocation
         }()

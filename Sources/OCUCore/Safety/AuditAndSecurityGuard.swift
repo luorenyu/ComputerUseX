@@ -1,5 +1,265 @@
 import Foundation
 import AppKit
+import CoreGraphics
+
+public struct SpaceFocusTraceEntry: Codable, Sendable {
+    public var timestamp: String
+    public var command: String
+    public var subStep: String
+    public var targetPid: Int32?
+    public var targetWindowID: UInt32?
+    public var frontmostAppBefore: String
+    public var frontmostAppAfter: String
+    public var targetOnCurrentSpaceBefore: Bool?
+    public var targetOnCurrentSpaceAfter: Bool?
+    public var spaceSwitched: Bool
+    public var focusStolen: Bool
+    public var details: String?
+    public var elapsedMs: Int
+}
+
+public final class SpaceFocusMonitor: @unchecked Sendable {
+    public static let shared = SpaceFocusMonitor()
+
+    private let lock = NSLock()
+    private var spaceChangeCounter: Int = 0
+    private var recentActivations: [(timestamp: Date, appName: String, pid: Int32)] = []
+    private var activeCommandName: String = "direct"
+    private var activeCommandStartSnapshot: StateSnapshot? = nil
+    private var activeSubSteps: [String] = []
+    private var activeCommandSpaceSwitched: Bool = false
+    private var activeCommandFocusStolen: Bool = false
+
+    public struct StateSnapshot: Sendable {
+        public let frontmostPid: Int32
+        public let frontmostAppName: String
+        public let targetPid: Int32?
+        public let targetWindowID: UInt32?
+        public let targetOnCurrentSpace: Bool?
+        public let spaceChangeCounter: Int
+        public let onScreenLayer0Windows: Set<UInt32>
+    }
+
+    public var traceFileURL: URL {
+        AuditAndSecurityGuard.shared.baseDirectory.appendingPathComponent("space_focus_trace.jsonl")
+    }
+
+    private init() {
+        let nc = NSWorkspace.shared.notificationCenter
+        nc.addObserver(
+            forName: NSWorkspace.activeSpaceDidChangeNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            guard let self else { return }
+            self.lock.lock()
+            self.spaceChangeCounter += 1
+            self.activeCommandSpaceSwitched = true
+            self.activeSubSteps.append("⚠️NSWorkspace.activeSpaceDidChangeNotification")
+            self.lock.unlock()
+        }
+        nc.addObserver(
+            forName: NSWorkspace.didActivateApplicationNotification,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            guard let self else { return }
+            let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            let name = app?.localizedName ?? "Unknown"
+            let pid = app?.processIdentifier ?? 0
+            self.lock.lock()
+            self.recentActivations.append((Date(), name, pid))
+            if self.recentActivations.count > 50 {
+                self.recentActivations.removeFirst(self.recentActivations.count - 50)
+            }
+            if let startSnap = self.activeCommandStartSnapshot, pid != 0, pid != startSnap.frontmostPid {
+                self.activeCommandFocusStolen = true
+                self.activeSubSteps.append("⚠️AppActivated(\(name)#\(pid))")
+            }
+            self.lock.unlock()
+        }
+    }
+
+    /// Returns true if `windowID` (or any layer-0 window belonging to `pid` when `windowID == 0`)
+    /// is present on the user's currently active macOS Space (`.optionOnScreenOnly`).
+    public func isWindowOnCurrentSpace(windowID: UInt32, pid: Int32? = nil) -> Bool {
+        guard let onScreenList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else {
+            return false
+        }
+        if windowID > 0 {
+            return onScreenList.contains { dict in
+                (dict[kCGWindowNumber as String] as? UInt32) == windowID
+            }
+        }
+        if let tPid = pid, tPid > 0 {
+            return onScreenList.contains { dict in
+                guard (dict[kCGWindowOwnerPID as String] as? Int32) == tPid,
+                      let layer = dict[kCGWindowLayer as String] as? Int,
+                      layer == 0,
+                      let bounds = dict[kCGWindowBounds as String] as? [String: CGFloat] else {
+                    return false
+                }
+                return (bounds["Width"] ?? 0) >= 80 && (bounds["Height"] ?? 0) >= 80
+            }
+        }
+        return false
+    }
+
+    public func captureSnapshot(targetPid: Int32? = nil, targetWindowID: UInt32? = nil) -> StateSnapshot {
+        let frontApp = NSWorkspace.shared.frontmostApplication
+        let frontPid = frontApp?.processIdentifier ?? 0
+        let frontName = frontApp?.localizedName ?? "Unknown"
+        let onScreenList = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        var layer0Wins = Set<UInt32>()
+        for dict in onScreenList {
+            if let layer = dict[kCGWindowLayer as String] as? Int, layer == 0,
+               let wid = dict[kCGWindowNumber as String] as? UInt32 {
+                layer0Wins.insert(wid)
+            }
+        }
+        let effWid = targetWindowID ?? (targetPid.flatMap { SyntheticFocusEnforcer.shared.pinnedWindowID(forPid: $0) })
+        let onCurrSpace: Bool? = {
+            if let wid = effWid, wid > 0 {
+                return layer0Wins.contains(wid)
+            }
+            if let pid = targetPid, pid > 0 {
+                return isWindowOnCurrentSpace(windowID: 0, pid: pid)
+            }
+            return nil
+        }()
+        lock.lock()
+        let sc = spaceChangeCounter
+        lock.unlock()
+        return StateSnapshot(
+            frontmostPid: frontPid,
+            frontmostAppName: "\(frontName)(\(frontPid))",
+            targetPid: targetPid,
+            targetWindowID: effWid,
+            targetOnCurrentSpace: onCurrSpace,
+            spaceChangeCounter: sc,
+            onScreenLayer0Windows: layer0Wins
+        )
+    }
+
+    public func beginCommand(_ command: String, targetPid: Int32? = nil, targetWindowID: UInt32? = nil) {
+        let snap = captureSnapshot(targetPid: targetPid, targetWindowID: targetWindowID)
+        lock.lock()
+        activeCommandName = command
+        activeCommandStartSnapshot = snap
+        activeSubSteps = []
+        activeCommandSpaceSwitched = false
+        activeCommandFocusStolen = false
+        lock.unlock()
+    }
+
+    @discardableResult
+    public func traceSubStep<T>(
+        _ subStep: String,
+        targetPid: Int32? = nil,
+        windowID: UInt32? = nil,
+        details: String? = nil,
+        block: () throws -> T
+    ) rethrows -> T {
+        let start = Date()
+        let before = captureSnapshot(targetPid: targetPid, targetWindowID: windowID)
+        let result = try block()
+        let after = captureSnapshot(targetPid: targetPid, targetWindowID: windowID)
+        let ms = Int(Date().timeIntervalSince(start) * 1000)
+
+        let targetMovedToCurrentSpace = (before.targetOnCurrentSpace == false && after.targetOnCurrentSpace == true)
+        let spaceSwitched = (after.spaceChangeCounter > before.spaceChangeCounter) || targetMovedToCurrentSpace
+        let focusStolen = (before.frontmostPid != after.frontmostPid)
+
+        lock.lock()
+        let cmd = activeCommandName
+        var stepTag = "\(subStep)(\(ms)ms"
+        if let onSpace = before.targetOnCurrentSpace {
+            stepTag += onSpace ? ",sameSpace" : ",crossSpace"
+        }
+        if spaceSwitched {
+            stepTag += ",⚠️SPACE_SWITCH"
+            activeCommandSpaceSwitched = true
+        }
+        if focusStolen {
+            stepTag += ",⚠️FOCUS_STOLEN:\(before.frontmostAppName)->\(after.frontmostAppName)"
+            activeCommandFocusStolen = true
+        }
+        stepTag += ")"
+        activeSubSteps.append(stepTag)
+        lock.unlock()
+
+        let entry = SpaceFocusTraceEntry(
+            timestamp: ISO8601DateFormatter().string(from: Date()),
+            command: cmd,
+            subStep: subStep,
+            targetPid: targetPid ?? before.targetPid,
+            targetWindowID: windowID ?? before.targetWindowID,
+            frontmostAppBefore: before.frontmostAppName,
+            frontmostAppAfter: after.frontmostAppName,
+            targetOnCurrentSpaceBefore: before.targetOnCurrentSpace,
+            targetOnCurrentSpaceAfter: after.targetOnCurrentSpace,
+            spaceSwitched: spaceSwitched,
+            focusStolen: focusStolen,
+            details: details,
+            elapsedMs: ms
+        )
+        appendTraceEntry(entry)
+        return result
+    }
+
+    public func recordSubStepMarker(_ marker: String) {
+        lock.lock()
+        activeSubSteps.append(marker)
+        lock.unlock()
+    }
+
+    public func enrichAuditRecord(_ record: inout AuditRecord) {
+        let endSnap = captureSnapshot(
+            targetPid: ElementSnapshotStore.shared.currentSnapshot()?.activePid,
+            targetWindowID: record.windowID ?? ElementSnapshotStore.shared.currentSnapshot()?.windowID
+        )
+        lock.lock()
+        let startSnap = activeCommandStartSnapshot ?? endSnap
+        let steps = activeSubSteps
+        let cmdSpaceSwitched = activeCommandSpaceSwitched
+        let cmdFocusStolen = activeCommandFocusStolen
+        lock.unlock()
+
+        let didSwitchSpace = cmdSpaceSwitched || (endSnap.spaceChangeCounter > startSnap.spaceChangeCounter)
+        let didStealFocus = cmdFocusStolen || (startSnap.frontmostPid != endSnap.frontmostPid)
+
+        record.frontmostAppBefore = startSnap.frontmostAppName
+        record.frontmostAppAfter = endSnap.frontmostAppName
+        record.targetOnCurrentSpaceBefore = startSnap.targetOnCurrentSpace ?? endSnap.targetOnCurrentSpace
+        record.targetOnCurrentSpaceAfter = endSnap.targetOnCurrentSpace
+        record.spaceSwitched = didSwitchSpace
+        record.focusStolen = didStealFocus
+        if !steps.isEmpty {
+            record.subSteps = steps
+        }
+    }
+
+    private func appendTraceEntry(_ entry: SpaceFocusTraceEntry) {
+        let encoder = JSONEncoder()
+        guard let data = try? encoder.encode(entry),
+              var line = String(data: data, encoding: .utf8) else {
+            return
+        }
+        line.append("\n")
+        guard let lineData = line.data(using: .utf8) else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        if FileManager.default.fileExists(atPath: traceFileURL.path) {
+            if let handle = try? FileHandle(forWritingTo: traceFileURL) {
+                defer { try? handle.close() }
+                _ = try? handle.seekToEnd()
+                try? handle.write(contentsOf: lineData)
+            }
+        } else {
+            try? lineData.write(to: traceFileURL, options: .atomic)
+        }
+    }
+}
 
 public struct AuditRecord: Codable, Sendable {
     public var timestamp: String
@@ -11,6 +271,13 @@ public struct AuditRecord: Codable, Sendable {
     public var success: Bool
     public var details: String?
     public var elapsedMs: Int
+    public var frontmostAppBefore: String?
+    public var frontmostAppAfter: String?
+    public var targetOnCurrentSpaceBefore: Bool?
+    public var targetOnCurrentSpaceAfter: Bool?
+    public var spaceSwitched: Bool?
+    public var focusStolen: Bool?
+    public var subSteps: [String]?
 
     public init(
         timestamp: String = ISO8601DateFormatter().string(from: Date()),
@@ -21,7 +288,14 @@ public struct AuditRecord: Codable, Sendable {
         point: ScreenPoint? = nil,
         success: Bool,
         details: String? = nil,
-        elapsedMs: Int
+        elapsedMs: Int,
+        frontmostAppBefore: String? = nil,
+        frontmostAppAfter: String? = nil,
+        targetOnCurrentSpaceBefore: Bool? = nil,
+        targetOnCurrentSpaceAfter: Bool? = nil,
+        spaceSwitched: Bool? = nil,
+        focusStolen: Bool? = nil,
+        subSteps: [String]? = nil
     ) {
         self.timestamp = timestamp
         self.command = command
@@ -32,6 +306,13 @@ public struct AuditRecord: Codable, Sendable {
         self.success = success
         self.details = details
         self.elapsedMs = elapsedMs
+        self.frontmostAppBefore = frontmostAppBefore
+        self.frontmostAppAfter = frontmostAppAfter
+        self.targetOnCurrentSpaceBefore = targetOnCurrentSpaceBefore
+        self.targetOnCurrentSpaceAfter = targetOnCurrentSpaceAfter
+        self.spaceSwitched = spaceSwitched
+        self.focusStolen = focusStolen
+        self.subSteps = subSteps
     }
 }
 
@@ -302,11 +583,13 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
     public func recordAudit(_ record: AuditRecord) {
         let config = loadConfig()
         guard config.auditLoggingEnabled else { return }
+        var enriched = record
+        SpaceFocusMonitor.shared.enrichAuditRecord(&enriched)
         lock.lock()
         defer { lock.unlock() }
 
         let encoder = JSONEncoder()
-        guard let data = try? encoder.encode(record),
+        guard let data = try? encoder.encode(enriched),
               var line = String(data: data, encoding: .utf8) else {
             return
         }
@@ -568,7 +851,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
             let marketplaceRoot = self.baseDirectory.appendingPathComponent("codex-marketplace", isDirectory: true)
             let marketplaceMetaDir = marketplaceRoot.appendingPathComponent(".agents/plugins", isDirectory: true)
             let pluginBundleDir = marketplaceRoot.appendingPathComponent("plugins/computer-use-x", isDirectory: true)
-            let codexPluginCacheDir = codexDir.appendingPathComponent("plugins/cache/computer-use-x/computer-use-x/1.0.0", isDirectory: true)
+            let codexPluginCacheDir = codexDir.appendingPathComponent("plugins/cache/computer-use-x/computer-use-x/1.1.0", isDirectory: true)
 
             for targetPluginDir in [pluginBundleDir, codexPluginCacheDir] {
                 let metaDir = targetPluginDir.appendingPathComponent(".codex-plugin", isDirectory: true)
@@ -595,7 +878,7 @@ public final class AuditAndSecurityGuard: @unchecked Sendable {
                 let pluginJSON = """
                 {
                   "name": "computer-use-x",
-                  "version": "1.0.0",
+                  "version": "1.1.0",
                   "description": "Zero-focus native macOS Computer Use engine (AXUIElement + Apple Vision OCR + Live PiP Preview + Gemini Aurora HUD + Session Billing).",
                   "author": {
                     "name": "ComputerUseX",

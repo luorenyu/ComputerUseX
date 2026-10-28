@@ -2,7 +2,7 @@ import Foundation
 import OCUCore
 
 struct OCUCLI {
-    static let version = "1.0.0"
+    static let version = "1.1.0"
 
     static func main() {
         var rawArgs = Array(CommandLine.arguments.dropFirst())
@@ -340,6 +340,9 @@ struct OCUCLI {
             } else if positional.count >= 2 && positional[0].hasPrefix("@") {
                 targetRef = positional[0]
                 textVal = positional.dropFirst().joined(separator: " ")
+            } else if positional.count == 1 && positional[0].hasPrefix("@") && (flags["text"] != nil || flags["image"] != nil || flags["file"] != nil) {
+                targetRef = positional[0]
+                textVal = flags["text"] ?? ""
             } else {
                 targetRef = nil
                 textVal = flags["text"] ?? positional.joined(separator: " ")
@@ -355,7 +358,8 @@ struct OCUCLI {
                 text: textVal,
                 submit: boolFlags.contains("submit") || boolFlags.contains("enter"),
                 clearFirst: boolFlags.contains("clear"),
-                virtualCursor: isVirtual
+                virtualCursor: isVirtual,
+                outputPath: flags["image"] ?? flags["file"]
             )
 
         case "batch":
@@ -366,10 +370,11 @@ struct OCUCLI {
                 let subReq = parseSubcommand(command: subCmd, args: Array(words.dropFirst()))
                 stepReqs.append(subReq)
             }
+            let anyCompact = boolFlags.contains("compact") || stepReqs.contains(where: { $0.compact == true })
             let isVirtual: Bool? = boolFlags.contains("physical") ? false : (boolFlags.contains("virtual") ? true : nil)
             return IPCRequest(
                 command: "batch",
-                compact: boolFlags.contains("compact"),
+                compact: anyCompact,
                 virtualCursor: isVirtual,
                 steps: stepReqs
             )
@@ -381,13 +386,33 @@ struct OCUCLI {
             )
 
         case "scroll":
+            var targetRef = flags["target"]
+            var scrollDx = Double(flags["dx"] ?? "0") ?? 0
+            var scrollDy = Double(flags["dy"] ?? "-240") ?? -240
+            if let firstPos = positional.first {
+                let lower = firstPos.lowercased()
+                let mag = abs(Double(positional.dropFirst().first ?? flags["amount"] ?? "360") ?? 360)
+                if lower == "down" {
+                    scrollDy = -mag
+                } else if lower == "up" {
+                    scrollDy = mag
+                } else if lower == "right" {
+                    scrollDx = -mag
+                    if flags["dy"] == nil { scrollDy = 0 }
+                } else if lower == "left" {
+                    scrollDx = mag
+                    if flags["dy"] == nil { scrollDy = 0 }
+                } else if targetRef == nil {
+                    targetRef = firstPos
+                }
+            }
             return IPCRequest(
                 command: "scroll",
-                target: flags["target"] ?? positional.first,
+                target: targetRef,
                 x: Double(flags["x"] ?? ""),
                 y: Double(flags["y"] ?? ""),
-                dx: Double(flags["dx"] ?? "0"),
-                dy: Double(flags["dy"] ?? "-240")
+                dx: scrollDx,
+                dy: scrollDy
             )
 
         case "drag":

@@ -28,21 +28,26 @@ swift "${ROOT_DIR}/scripts/generate-icon.swift" "${RESOURCES_DIR}/AppIcon.icns" 
 mkdir -p "${ROOT_DIR}/plugins/codex/plugins/computer-use-x/assets"
 cp "${RESOURCES_DIR}/app-icon.png" "${ROOT_DIR}/plugins/codex/plugins/computer-use-x/assets/app-icon.png"
 
-# Prefer a deterministic Apple Development certificate (sorted by name) so rebuilds keep macOS TCC permissions;
-# otherwise fall back to ad-hoc signature.
-DEV_IDENTITY_LINE="$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development:" | sort -k3 | head -n 1 || true)"
-DEV_HASH="$(echo "${DEV_IDENTITY_LINE}" | awk '{print $2}' || true)"
-DEV_NAME="$(echo "${DEV_IDENTITY_LINE}" | awk -F'"' '{print $2}' || true)"
+# Prefer an explicit CODESIGN_IDENTITY env var or a deterministic Apple Development certificate
+# so rebuilds keep macOS TCC permissions; otherwise fall back to ad-hoc signature (e.g. in CI).
+if [[ -n "${CODESIGN_IDENTITY:-}" ]]; then
+    DEV_HASH="${CODESIGN_IDENTITY}"
+    DEV_NAME="Custom Identity"
+else
+    DEV_IDENTITY_LINE="$(security find-identity -v -p codesigning 2>/dev/null | grep "Apple Development:" | sort -k3 | head -n 1 || true)"
+    DEV_HASH="$(echo "${DEV_IDENTITY_LINE}" | awk '{print $2}' || true)"
+    DEV_NAME="$(echo "${DEV_IDENTITY_LINE}" | awk -F'"' '{print $2}' || true)"
+fi
 
 if [[ -n "${DEV_HASH}" ]]; then
     echo "🔏 Signing bundle with stable developer identity: ${DEV_NAME} (${DEV_HASH})"
     codesign --force --sign "${DEV_HASH}" "${MACOS_DIR}/cux"
-    codesign --force --sign "${DEV_HASH}" --identifier "org.computerusex.app" "${APP_BUNDLE}"
+    codesign --force --deep --sign "${DEV_HASH}" --identifier "org.computerusex.app" "${APP_BUNDLE}"
     codesign --force --sign "${DEV_HASH}" "${DIST_DIR}/cux"
 else
     echo "🔏 Signing bundle with ad-hoc signature..."
     codesign --force --sign - "${MACOS_DIR}/cux"
-    codesign --force --sign - --identifier "org.computerusex.app" "${APP_BUNDLE}"
+    codesign --force --deep --sign - --identifier "org.computerusex.app" "${APP_BUNDLE}"
     codesign --force --sign - "${DIST_DIR}/cux"
 fi
 

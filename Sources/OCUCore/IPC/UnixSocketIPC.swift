@@ -259,6 +259,13 @@ public final class UnixSocketIPC: @unchecked Sendable {
             )
             if request.agentName == nil { request.agentName = detected.agentName }
             if request.modelName == nil { request.modelName = detected.modelName }
+            if var innerSteps = request.steps, !innerSteps.isEmpty {
+                for idx in innerSteps.indices {
+                    if innerSteps[idx].agentName == nil { innerSteps[idx].agentName = request.agentName }
+                    if innerSteps[idx].modelName == nil { innerSteps[idx].modelName = request.modelName }
+                }
+                request.steps = innerSteps
+            }
         }
         let daemonOnline = isDaemonReachable()
 

@@ -197,8 +197,10 @@ public final class BrowserBridgeController: @unchecked Sendable {
         guard windowBounds.width > 80, windowBounds.height > 80 else { return false }
         let relX = max(0.0, min(1.0, (point.x - windowBounds.x) / windowBounds.width))
         let distFromBottom = max(0.0, windowBounds.maxY - point.y)
-        // Note: In cux scroll, positive dy (+500) is often passed by LLMs to scroll down, or negative dy (-500).
-        // Let's check scrollTop before/after and handle inner scrollable divs!
+        // In macOS CGEvent scroll wheel convention used by `cux scroll`, negative `dy` (e.g. -240, -1000) scrolls DOWN
+        // (increasing DOM `scrollTop`), whereas positive `dy` scrolls UP (decreasing DOM `scrollTop`).
+        let domDeltaY = Int((-dy).rounded())
+        let domDeltaX = Int((-dx).rounded())
         let js = """
         (function() {
             var vx = Math.round(window.innerWidth * \(String(format: "%.5f", relX)));
@@ -213,13 +215,34 @@ public final class BrowserBridgeController: @unchecked Sendable {
                 }
                 el = el.parentElement;
             }
-            var deltaY = \(Int(dy.rounded()));
-            var deltaX = \(Int(dx.rounded()));
+            var deltaY = \(domDeltaY);
+            var deltaX = \(domDeltaX);
             if (target) {
+                var beforeTop = target.scrollTop;
                 target.scrollBy({left: deltaX, top: deltaY, behavior: 'instant'});
-                return 'SCROLLED_EL';
+                if (target.scrollTop !== beforeTop) return 'SCROLLED_EL';
             }
+            var beforeWinY = window.scrollY;
             window.scrollBy({left: deltaX, top: deltaY, behavior: 'instant'});
+            if (window.scrollY !== beforeWinY) return 'SCROLLED_WIN';
+            var all = document.querySelectorAll('div, main, section, article, ul');
+            var best = null;
+            var bestArea = 0;
+            for (var i = 0; i < all.length; i++) {
+                var c = all[i];
+                if (c.scrollHeight > c.clientHeight + 16 && c.clientWidth > 180 && c.clientHeight > 120) {
+                    var cst = window.getComputedStyle(c);
+                    var coy = cst ? cst.overflowY : '';
+                    if (coy === 'auto' || coy === 'scroll' || coy === 'overlay') {
+                        var area = c.clientWidth * c.clientHeight;
+                        if (area > bestArea) { bestArea = area; best = c; }
+                    }
+                }
+            }
+            if (best) {
+                best.scrollBy({left: deltaX, top: deltaY, behavior: 'instant'});
+                return 'SCROLLED_SPA_CONTAINER';
+            }
             return 'SCROLLED_WIN';
         })()
         """

@@ -3,7 +3,7 @@ import Foundation
 public final class MCPServer: @unchecked Sendable {
     public static let shared = MCPServer()
     public static let serverName = "computer-use-x"
-    public static let serverVersion = "1.0.0"
+    public static let serverVersion = "1.1.0"
 
     private init() {}
 
@@ -152,6 +152,17 @@ public final class MCPServer: @unchecked Sendable {
     }
 
     private func buildIPCRequest(for toolName: String, arguments: [String: Any]) -> IPCRequest {
+        var req = buildCoreIPCRequest(for: toolName, arguments: arguments)
+        if req.agentName == nil, let a = arguments["agent"] as? String, !a.isEmpty {
+            req.agentName = a
+        }
+        if req.modelName == nil, let m = arguments["model"] as? String, !m.isEmpty {
+            req.modelName = m
+        }
+        return req
+    }
+
+    private func buildCoreIPCRequest(for toolName: String, arguments: [String: Any]) -> IPCRequest {
         let normalized = toolName.replacingOccurrences(of: "ocu_", with: "cux_")
         switch normalized {
         case "cux_status":
@@ -264,7 +275,8 @@ public final class MCPServer: @unchecked Sendable {
                 dy: doubleVal(arguments["dy"]),
                 text: arguments["text"] as? String ?? "",
                 submit: arguments["submit"] as? Bool ?? false,
-                clearFirst: arguments["clear"] as? Bool ?? false
+                clearFirst: arguments["clear"] as? Bool ?? false,
+                outputPath: (arguments["image"] as? String) ?? (arguments["file"] as? String)
             )
         case "cux_batch":
             let rawSteps = arguments["steps"] as? [[String: Any]] ?? []
@@ -273,7 +285,8 @@ public final class MCPServer: @unchecked Sendable {
                 let stripped = rawCmd.replacingOccurrences(of: "cux_", with: "").replacingOccurrences(of: "ocu_", with: "")
                 return buildIPCRequest(for: "cux_\(stripped)", arguments: stepDict)
             }
-            return IPCRequest(command: "batch", steps: parsedSteps)
+            let anyCompact = (arguments["compact"] as? Bool ?? false) || parsedSteps.contains(where: { $0.compact == true })
+            return IPCRequest(command: "batch", compact: anyCompact, steps: parsedSteps)
         case "cux_press":
             return IPCRequest(
                 command: "press",
@@ -467,11 +480,12 @@ public final class MCPServer: @unchecked Sendable {
             ],
             [
                 "name": "cux_type",
-                "description": "Type text (English, Chinese, Emoji, or multi-line) into the focused field, a target element (@e1), a relative offset from @e1 (dx, dy), or (x, y) coordinates. Uses safe clipboard transaction to prevent IME garbling.",
+                "description": "Type text (English, Chinese, Emoji, or multi-line with Shift+Enter) and/or paste an image attachment into the focused field, a target element (@e1), a relative offset from @e1 (dx, dy), or (x, y) coordinates.",
                 "inputSchema": [
                     "type": "object",
                     "properties": [
-                        "text": ["type": "string", "description": "Text content to type"],
+                        "text": ["type": "string", "description": "Text content to type (newlines automatically use Shift+Enter)"],
+                        "image": ["type": "string", "description": "Optional local image file path (PNG/JPG) to paste into the input box via native Paste menu item"],
                         "target": ["type": "string", "description": "Optional element reference (@e1) to click before typing"],
                         "x": ["type": "number", "description": "Optional X coordinate to click before typing"],
                         "y": ["type": "number", "description": "Optional Y coordinate to click before typing"],
@@ -479,8 +493,7 @@ public final class MCPServer: @unchecked Sendable {
                         "dy": ["type": "number", "description": "Optional relative Y offset from target to click before typing"],
                         "clear": ["type": "boolean", "description": "Select all (Cmd+A) and delete existing text before typing (default: false)"],
                         "submit": ["type": "boolean", "description": "Press Return/Enter after typing (default: false)"]
-                    ],
-                    "required": ["text"]
+                    ]
                 ]
             ],
             [

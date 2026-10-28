@@ -182,9 +182,9 @@ flowchart TB
 | Layer | Core Modules | Source Path | Responsibilities |
 | :--- | :--- | :--- | :--- |
 | **1. Agent Protocol & Interface Layer** | `MCPServer`<br/>`cux` CLI<br/>`Plugins & Skills` | `Sources/OCUCore/MCP/`<br/>`Sources/cux/`<br/>`plugins/codex/` | Parses MCP (`stdio` JSON-RPC 2.0) and CLI requests; provides the native OpenAI Codex plugin and reusable Agent Skill definitions. |
-| **2. Session Governance & Security Layer** | `AuditAndSecurityGuard`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | Enforces app allowlists and triggers interactive approval prompts; detects `SecureEventInput` and password fields to block sensitive keystrokes; persists `@e1..@eN` mappings and `~/.computerusex/` audit/billing logs. |
-| **3. Core Perception & Action Engine Layer** | **Perception**: `AXEngine` / `VisionOCR` / `Capture` / `Diff`<br/>**Execution**: `ActionExecutor` / `BrowserBridge` / `Sandbox` | `Sources/OCUCore/AX/`<br/>`Sources/OCUCore/OCR/`<br/>`Sources/OCUCore/Capture/`<br/>`Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Browser/`<br/>`Sources/OCUCore/Sandbox/` | **Perception**: Traverses `AXUIElement` trees + Apple `Vision` OCR (`IoU > 0.45` deduplication) + `dHash` fingerprints + SoM annotation + `--diff` incremental comparison.<br/>**Execution**: **3-tier routing** (Tier 1 native `AXPress`/`AXValue` → Tier 2 background `CGEvent.postToPid` → Tier 3 hardware `CGEvent` fallback), transactional pasteboard typing, browser DOM/JS bridge, and window sandboxing. |
-| **4. Companion Daemon & OS Layer** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | Bridges stateless CLI calls to the resident `ComputerUseX.app` via `/tmp/cux-<uid>.sock`, hosting the Control Center, bottom-right Live PiP background window preview, and screen overlay HUD. |
+| **2. Session Governance & Security Layer** | `AuditAndSecurityGuard`<br/>`SessionBillingManager`<br/>`Models` | `Sources/OCUCore/Safety/`<br/>`Sources/OCUCore/Models/` | Enforces app allowlists and triggers interactive approval prompts; detects `SecureEventInput` and password fields to block sensitive keystrokes; performs real-time `KERN_PROCARGS2` operator/model detection; persists `@e1..@eN` mappings and `~/.computerusex/` audit/billing logs. |
+| **3. Core Perception & Action Engine Layer** | **Perception**: `AXScanner` / `VisionOCRScanner` / `ScreenCaptureService` / `ElementSnapshotStore`<br/>**Execution**: `MouseController` / `KeyboardController` / `AppWorkspaceController` / `BrowserBridgeController` / `SyntheticFocusEnforcer` | `Sources/OCUCore/Perception/`<br/>`Sources/OCUCore/Action/`<br/>`Sources/OCUCore/Permissions/` | **Perception**: Traverses `AXUIElement` trees (with off-Space remote token discovery & automatic Chromium UI Zoom calibration) + Apple `Vision` OCR (`IoU > 0.45` deduplication) + `dHash` fingerprints + SoM annotation + post-action incremental diffs.<br/>**Execution**: **3-tier routing** (Tier 1 native `AXPress`/`AXValue` → Tier 2 background `CGEvent.postToPid` → Tier 3 hardware `CGEvent` fallback), multi-monitor/cross-Space zero-interruption window handling, rich-text editor activation, browser DOM/JS bridge, and window sandboxing. |
+| **4. Companion Daemon & OS Layer** | `UnixSocketIPC`<br/>`ComputerUseXApp` | `Sources/OCUCore/IPC/`<br/>`Sources/ComputerUseXApp/` | Bridges stateless CLI calls to the resident `ComputerUseX.app` via `/tmp/cux-<uid>.sock`, hosting the Control Center, smart background Live PiP preview (auto-hidden when target window is already frontmost), and screen overlay HUD. |
 
 ---
 
@@ -222,19 +222,15 @@ ComputerUseX/
 ├── Package.swift                       # Swift 6 package manifest (OCUCore, cux, ComputerUseXApp)
 ├── Sources/
 │   ├── OCUCore/                        # Core engine library
-│   │   ├── Models/                     # UIElementNode, SnapshotResult, IPC & Audit models
-│   │   ├── AX/                         # macOS AXUIElement traversal & semantic pruning
-│   │   ├── OCR/                        # Apple Vision OCR & IoU deduplication
-│   │   ├── Capture/                    # Window capture, dHash & Set-of-Marks annotation
-│   │   ├── Perception/                 # Incremental snapshot diff engine
-│   │   ├── Action/                     # Multi-tier click/type/press/scroll/drag executor
-│   │   ├── Browser/                    # Chrome/Safari/Arc/Brave/Edge DOM & JS bridge
-│   │   ├── Sandbox/                    # Off-screen window parking & restoration
-│   │   ├── Safety/                     # App authorization guard, audit log & session billing
-│   │   ├── IPC/                        # Unix Domain Socket server & client (/tmp/cux-<uid>.sock)
+│   │   ├── Models/                     # UIElementRef, SnapshotResult, IPC & Audit models
+│   │   ├── Perception/                 # AXScanner, VisionOCRScanner, ScreenCaptureService, ElementSnapshotStore, SoMAnnotator
+│   │   ├── Action/                     # MouseController, KeyboardController, AppWorkspaceController, BrowserBridgeController, SyntheticFocusEnforcer
+│   │   ├── Permissions/                # PermissionManager & multi-display geometry discovery
+│   │   ├── Safety/                     # AuditAndSecurityGuard, KillSwitchMonitor & SessionBillingManager
+│   │   ├── IPC/                        # UnixSocketIPC & OCUCommandExecutor (/tmp/cux-<uid>.sock)
 │   │   └── MCP/                        # stdio JSON-RPC 2.0 MCP Server (17 tools)
 │   ├── cux/                            # CLI & MCP executable entry point
-│   └── ComputerUseXApp/                # Companion macOS MenuBar app, Dashboard & Live PiP HUD
+│   └── ComputerUseXApp/                # Companion macOS MenuBar app, Dashboard, VirtualCursor & Live PiP HUD
 ├── plugins/codex/                      # Native OpenAI Codex plugin (.codex-plugin & marketplace)
 ├── skills/computer-use-x/              # Agent Skill definition (SKILL.md)
 ├── scripts/                            # Build (build-app.sh) & one-click installer (install.sh)

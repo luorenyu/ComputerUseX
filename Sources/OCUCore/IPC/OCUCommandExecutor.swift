@@ -7,12 +7,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
     private init() {}
 
     public func execute(_ request: IPCRequest, isDaemonContext: Bool = false) -> IPCResponse {
-        if request.agentName != nil || request.modelName != nil {
-            _ = SessionBillingManager.shared.detectCurrentOperator(
-                explicitAgent: request.agentName,
-                explicitModel: request.modelName
-            )
-        }
+        SessionBillingManager.shared.notifyCommandStarting(request: request)
         let startTime = Date()
         let response = executeCore(request, isDaemonContext: isDaemonContext)
         let elapsedMs = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -27,6 +22,13 @@ public final class OCUCommandExecutor: @unchecked Sendable {
     }
 
     private func executeCore(_ request: IPCRequest, isDaemonContext: Bool = false) -> IPCResponse {
+        let initialPid = ElementSnapshotStore.shared.currentSnapshot()?.activePid
+        let initialWid = request.windowID ?? ElementSnapshotStore.shared.currentSnapshot()?.windowID
+        SpaceFocusMonitor.shared.beginCommand(
+            request.command,
+            targetPid: initialPid,
+            targetWindowID: initialWid
+        )
         do {
             switch request.command {
             case "status":
@@ -180,11 +182,13 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                 return IPCResponse(id: request.id, ok: true, outcome: outcome)
 
             case "type":
-                guard let text = request.text else {
+                let text = request.text ?? ""
+                let imagePath = request.outputPath
+                guard !text.isEmpty || (imagePath != nil && !imagePath!.isEmpty) else {
                     throw OCUError(
                         code: .invalidArguments,
-                        message: "Missing 'text' parameter for type command.",
-                        recoveryHint: "Provide the text string to type."
+                        message: "Missing 'text' or '--image' parameter for type command.",
+                        recoveryHint: "Provide the text string to type or --image <path> to paste an image."
                     )
                 }
                 var outcome = try KeyboardController.shared.typeText(
@@ -196,6 +200,7 @@ public final class OCUCommandExecutor: @unchecked Sendable {
                     dy: request.dy,
                     clearFirst: request.clearFirst ?? false,
                     submit: request.submit ?? false,
+                    imagePath: imagePath,
                     virtualCursor: request.virtualCursor
                 )
                 if let diff = ElementSnapshotStore.shared.computePostActionDiff() {
@@ -415,7 +420,24 @@ public final class OCUCommandExecutor: @unchecked Sendable {
             case "audit":
                 let records = AuditAndSecurityGuard.shared.recentAuditRecords(limit: request.clickCount ?? 20)
                 let lines = records.map { rec in
-                    "[\(rec.timestamp)] \(rec.command) | target=\(rec.target ?? rec.app ?? "-") | ok=\(rec.success) | \(rec.details ?? "") (\(rec.elapsedMs)ms)"
+                    var telemetryParts: [String] = []
+                    if let onSpace = rec.targetOnCurrentSpaceBefore {
+                        telemetryParts.append(onSpace ? "sameSpace" : "crossSpace")
+                    }
+                    if let sw = rec.spaceSwitched {
+                        telemetryParts.append("spaceSwitched=\(sw)")
+                    }
+                    if let fs = rec.focusStolen {
+                        telemetryParts.append("focusStolen=\(fs)")
+                    }
+                    if let fb = rec.frontmostAppBefore, let fa = rec.frontmostAppAfter {
+                        telemetryParts.append("front=\(fb)->\(fa)")
+                    }
+                    if let steps = rec.subSteps, !steps.isEmpty {
+                        telemetryParts.append("steps=[\(steps.joined(separator: " -> "))]")
+                    }
+                    let telemetrySuffix = telemetryParts.isEmpty ? "" : " | " + telemetryParts.joined(separator: ", ")
+                    return "[\(rec.timestamp)] \(rec.command) | target=\(rec.target ?? rec.app ?? "-") | ok=\(rec.success) | \(rec.details ?? "")\(telemetrySuffix) (\(rec.elapsedMs)ms)"
                 }
                 let outcome = ActionOutcome(
                     action: "audit",
